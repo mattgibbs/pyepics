@@ -3,11 +3,14 @@ Maintainer: Daron Chabot <dchabot@bnl.gov>
 Section: python
 Priority: optional
 Build-Depends: python-setuptools (>= 0.6b3), python-all (>= 2.6.6-3), debhelper (>= 7)
+XS-Python-Version: >= 2.6
 Standards-Version: 3.9.1
+Homepage: https://github.com/pyepics/pyepics.git
+Vcs-Git:  https://github.com/pyepics/pyepics.git
 
 Package: python-pyepics
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}
+Depends: ${misc:Depends}, ${python:Depends}, libepics3.14.12.3 (>= 3.14.12.3-6)
 Description: Epics Channel Access for Python
  Python Interface to the Epics Channel Access protocol
  of the Epics control system. 
