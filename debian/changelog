@@ -1,3 +1,9 @@
+pyepics (3.2.4-2) unstable; urgency=low
+
+  * Add build dependency on libepics3.14.12.3.
+
+ -- Daron Chabot <dchabot@bnl.gov>  Mon, 03 Nov 2014 23:08:04 -0500
+
 pyepics (3.2.4-1) unstable; urgency=low
 
   * source package automatically created by stdeb 0.6.0+git
