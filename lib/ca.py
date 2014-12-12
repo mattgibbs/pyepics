@@ -488,7 +488,7 @@ def _onConnectionEvent(args):
     connected. if provided, run a user-function"""
     ctx = current_context()
     pvname = name(args.chid)
-    conn = (args.op == dbr.OP_CONN_UP)    
+    conn = (args.op == dbr.OP_CONN_UP)
     global _cache
 
     if ctx is None and len(_cache.keys()) > 0:
@@ -771,7 +771,7 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
         entry = {'conn':False,  'chid': None,
                  'ts': 0,  'failures':0, 'value': None,
                  'callbacks': [ callback ]}
-        # logging.debug("Create Channel %s " % pvname)        
+        # logging.debug("Create Channel %s " % pvname)
         _cache[ctx][pvname] = entry
     else:
         entry = _cache[ctx][pvname]
@@ -1186,7 +1186,7 @@ def get_complete(chid, ftype=None, count=None, timeout=None,
     if as_string:
         val = _as_string(val, chid, count, ftype)
     elif isinstance(val, ctypes.Array) and HAS_NUMPY and as_numpy:
-        val = numpy.ctypeslib.as_array(copy(val))        
+        val = numpy.ctypeslib.as_array(copy(val))
 
     # value retrieved, clear cached value
     ncache['value'] = None
@@ -1361,7 +1361,7 @@ def get_ctrlvars(chid, timeout=5.0, warn=True):
         tmpv = ncache['ctrl_value'][0]
     except TypeError:
         return {}
-    
+
     out = {}
     for attr in ('precision', 'units', 'severity', 'status',
                  'upper_disp_limit', 'lower_disp_limit',
@@ -1539,12 +1539,11 @@ def sg_reset(gid):
     "resets a synchronous group"
     return libca.ca_sg_reset(gid)
 
-def sg_get(gid, chid, ftype=None, as_numpy=True, as_string=True):
+def sg_get(gid, chid, ftype=None):
     """synchronous-group get of the current value for a Channel.
-    same options as get()
 
-    This function will not immediately return the value, of course, but the
-    address of the underlying data.
+    This function will not immediately return the value, but instead a
+    ctypes structure which points to where the data will go.
 
     After the :func:`sg_block` has completed, you must use :func:`_unpack`
     to convert this data address to the actual value(s).
@@ -1553,11 +1552,11 @@ def sg_get(gid, chid, ftype=None, as_numpy=True, as_string=True):
     ========
 
     >>> chid = epics.ca.create_channel(PV_Name)
-    >>> epics.ca.connect_channel(chid1)
+    >>> epics.ca.connect_channel(chid)
     >>> sg = epics.ca.sg_create()
     >>> data = epics.ca.sg_get(sg, chid)
     >>> epics.ca.sg_block(sg)
-    >>> print epics.ca._unpack(data, chid=chid)
+    >>> print epics.ca._unpack(chid, data)
 
     """
     if not isinstance(chid, dbr.chid_t):
@@ -1565,17 +1564,19 @@ def sg_get(gid, chid, ftype=None, as_numpy=True, as_string=True):
 
     if ftype is None:
         ftype = field_type(chid)
+
     count = element_count(chid)
-
     data = (count*dbr.Map[ftype])()
-    ret = libca.ca_sg_array_get(gid, ftype, count, chid, data)
+    ret = libca.ca_sg_array_get(gid, ftype, count, chid,
+                                ctypes.addressof(data))
     PySEVCHK('sg_get', ret)
-    poll()
+    # NOTE: do not poll() here. from CA reference:
+    #   All remote operation requests such as the above are accumulated (buffered)
+    #   and not forwarded to the server until one of ca_flush_io(), ca_pend_io(),
+    #   ca_pend_event(), or ca_sg_block() are called. This allows several requests
+    #   to be efficiently sent in one message.
 
-    val = _unpack(chid, data, count=count, ftype=ftype, as_numpy=as_numpy)
-    if as_string:
-        val = _as_string(val, chid, count, ftype)
-    return val
+    return data
 
 def sg_put(gid, chid, value):
     """perform a `put` within a synchronous group.
@@ -1623,9 +1624,9 @@ def sg_put(gid, chid, value):
             errmsg = "Cannot put array data to PV of type '%s'"
             raise ChannelAccessException(errmsg % (repr(value)))
 
-    ret =  libca.ca_sg_array_put(gid, ftype, count, chid, data)
+    ret =  libca.ca_sg_array_put(gid, ftype, count, chid,
+                                 ctypes.addressof(data))
     PySEVCHK('sg_put', ret)
-    # poll()
     return ret
 
 class CAThread(Thread):
