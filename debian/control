@@ -11,7 +11,8 @@ Vcs-Git:  https://github.com/pyepics/pyepics.git
 
 Package: python-pyepics
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}, libepics3.14.12.3 (>= 3.14.12.3-6)
+Depends: ${misc:Depends}, ${python:Depends},
+         libepics3.14.12.3 (>= 3.14.12.3-6), python-numpy
 Description: Epics Channel Access for Python
  Python Interface to the Epics Channel Access protocol
  of the Epics control system. 

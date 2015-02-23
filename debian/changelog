@@ -1,3 +1,10 @@
+pyepics (3.2.4-3) unstable; urgency=low
+
+  * Official release of upstream 3.2.4.
+  * Fixes to dbr TIME and array-data handling
+
+ -- Daron Chabot <dchabot@bnl.gov>  Mon, 23 Feb 2015 12:20:49 -0500
+
 pyepics (3.2.4-2) unstable; urgency=low
 
   * Add build dependency on libepics3.14.12.3.
