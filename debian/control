@@ -6,10 +6,10 @@ Build-Depends: python-setuptools (>= 0.6b3), python-all (>= 2.6.6-3), debhelper 
 Standards-Version: 3.9.1
 
 
-
 Package: python-pyepics
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}
+Depends: ${misc:Depends}, ${python:Depends},
+         python-numpy, epics-dev
 Description: Epics Channel Access for Python
  Python Interface to the Epics Channel Access protocol
  of the Epics control system.   PyEpics provides 3 layers of access to
@@ -28,7 +28,3 @@ Description: Epics Channel Access for Python
  Devices -- collections of PVs that might represent an Epics Record
  or physical device (say, a camera, amplifier, or power supply), and
  to help write GUIs for CA.
- .
-
-
-
