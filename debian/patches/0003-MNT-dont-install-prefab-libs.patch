@@ -1,0 +1,25 @@
+From eeb5a4df8e4c69f77df99a778cbd0824745f528b Mon Sep 17 00:00:00 2001
+From: Daron Chabot <chabot@frib.msu.edu>
+Date: Thu, 18 May 2017 11:39:04 -0400
+Subject: [PATCH 3/3] MNT: dont install prefab libs
+
+---
+ setup.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/setup.py b/setup.py
+index 118f3bc..fa46157 100644
+--- a/setup.py
++++ b/setup.py
+@@ -92,7 +92,7 @@ setup(name = 'pyepics',
+                       'Topic :: Scientific/Engineering'],
+       packages = ['epics','epics.wx','epics.devices',
+                   'epics.compat', 'epics.autosave'],
+-      data_files = data_files )
++      data_files = None)
+ 
+ try:
+     libca = epics.ca.find_libca()
+-- 
+2.1.4
+
