@@ -1,0 +1,4 @@
+pyepics source: source-is-missing dlls/linux64/libca.so
+pyepics source: source-is-missing dlls/linux64/libCom.so
+pyepics source: source-is-missing dlls/linux32/libca.so
+pyepics source: source-is-missing dlls/linux32/libCom.so
