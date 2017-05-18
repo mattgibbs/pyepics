@@ -1,2 +1,3 @@
 0001-MNT-__version__-source-avoiding-versioneer.patch
 0002-MNT-drop-dependency-on-versioneer.patch
+0003-MNT-dont-install-prefab-libs.patch
