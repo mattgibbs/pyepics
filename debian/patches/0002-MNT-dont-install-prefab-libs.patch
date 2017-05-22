@@ -1,7 +1,7 @@
-From eeb5a4df8e4c69f77df99a778cbd0824745f528b Mon Sep 17 00:00:00 2001
+From 073b54790997a16f0fab8f6fb6fde97454a759c5 Mon Sep 17 00:00:00 2001
 From: Daron Chabot <chabot@frib.msu.edu>
 Date: Thu, 18 May 2017 11:39:04 -0400
-Subject: [PATCH 3/3] MNT: dont install prefab libs
+Subject: [PATCH 2/2] MNT: dont install prefab libs
 
 ---
  setup.py | 2 +-

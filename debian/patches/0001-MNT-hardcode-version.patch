@@ -1,7 +1,7 @@
-From 50929b0113e13714b80b60413a894f73f46b472d Mon Sep 17 00:00:00 2001
+From f2cd828dd0c37454db585591d659181ec0a35521 Mon Sep 17 00:00:00 2001
 From: Daron Chabot <chabot@frib.msu.edu>
 Date: Thu, 18 May 2017 10:38:31 -0400
-Subject: [PATCH 1/2] MNT: __version__ source, avoiding versioneer
+Subject: [PATCH 1/2] MNT: hardcode version
 
 ---
  epics/__init__.py | 4 +---
