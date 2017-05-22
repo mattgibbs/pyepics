@@ -1,3 +1,23 @@
+pyepics (3.2.6-2) unstable; urgency=low
+
+  * MNT: gitattributes plus gbp-buildpackage equals trouble
+  * BLD: add generated debian files
+  * BLD: dependencies
+  * BLD: omit versioneer's influence
+  * BLD: versioning
+  * BLD: minimal makefile
+  * ENH: upstream repo locations
+  * BLD: rules tweaks - versioneer
+  * BLD: remove versioneer
+  * BLD: autoclean
+  * BLD: do not install pkgd libca, libCom
+  * BLD: override lintian complaints
+  * BLD: rm egg-info
+  * BLD: re-organize patches
+  * BLD: ignore effect of git export on _version
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Mon, 22 May 2017 10:39:57 -0400
+
 pyepics (3.2.6-1) unstable; urgency=low
 
   * source package automatically created by stdeb 0.8.5
