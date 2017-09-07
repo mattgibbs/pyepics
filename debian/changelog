@@ -1,3 +1,60 @@
+pyepics (3.2.7-1) unstable; urgency=low
+
+  [ Vintar Rok ]
+  * Fix puting single value to waveform of strings.
+  * unit tests for waveforms of strings
+
+  [ Thomas A Caswell ]
+  * BLD: add env to suppress installing libca / libcom binaries
+
+  [ dchabot ]
+  * Update .travis.yml
+  * Update .travis.yml
+  * Update .travis.yml
+  * Update .travis.yml
+  * Update .travis.yml
+  * Update .travis.yml
+
+  [ Thomas A Caswell ]
+  * MNT: revert small logic change
+  * CI: expand test matrix
+  * FIX: also find libCom
+  * FIX: find libCom _first_ to defeat the system library search tools
+
+  [ Steven Hartman ]
+  * WIP: testing pyepics with IronPython 32-bit
+  * WIP: get_cache change for IronPyhon
+  * WIP: hide IronPython workarounds from non-IronPython implementations
+  * better check for IronPython
+  * typo
+  * change isIronPython function to IRON_PYTHON bool
+
+  [ Rok Vintar ]
+  * fix differnet behaviour of putting mixed types array to the waveform of strings in py2 and py3
+
+  [ Eran Greenberg ]
+  * fix typo in use_anaconda.bat
+
+  [ Matt Newville ]
+  * use PYTHONIOENCODING envvar and utf-8 as default string encoding
+  * fix line ending and use str.strip() for fastconn_pvlist.txt
+  * add  for string_waveform tests
+  * udate simulator to pause longer (up to 120 sec)
+  * add small, maybe unneeded, sleeps to string waveform tests
+  * add clear_auto_monitor() to call ca.clear_subscription
+  * fix typo for testing windows-ness
+  * tweaks to search path for find_lib, avoiding `None`
+  * add and use PV.force_read_access_rights(), as access rights events seem wrong on Windows64
+  * subarray test needs to use integers for slices
+  * update PV document to add new methods
+  * doc build should use mathjax
+  * doc: don't use html_smartypants
+
+  [ Daron Chabot ]
+  * MNT: bump upstream hardcoded version number
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 07 Sep 2017 14:12:52 -0400
+
 pyepics (3.2.6-2) unstable; urgency=low
 
   * MNT: gitattributes plus gbp-buildpackage equals trouble
