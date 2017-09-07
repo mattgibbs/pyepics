@@ -1,3 +1,9 @@
+pyepics (3.2.7-2) unstable; urgency=low
+
+  * MNT: avoid prefab libs
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 07 Sep 2017 14:37:33 -0400
+
 pyepics (3.2.7-1) unstable; urgency=low
 
   [ Vintar Rok ]
