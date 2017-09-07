@@ -162,6 +162,16 @@ class PV(object):
         self._args['chid'] = self.chid = chid
         self.__on_connect(pvname=pvname, chid=chid, conn=conn, **kws)
 
+    def force_read_access_rights(self): 
+        """force a read of access rights, not relying 
+        on last event callback.
+        Note: event callback seems to fail sometimes, 
+        at least on initial connection on Windows 64-bit.
+        """
+        self._args['access'] = ca.access(self.chid)
+        self._args['read_access'] = (1 == ca.read_access(self.chid))
+        self._args['write_access'] = (1 == ca.write_access(self.chid))
+
     def __on_access_rights_event(self, read_access, write_access):
         self._args['read_access'] = read_access
         self._args['write_access'] = write_access
@@ -198,12 +208,13 @@ class PV(object):
             if self._args['count'] is not None:
                 maxcount = self._args['count']
                 count = min(count,self._args['count'])
-                
+
             self._args['count']  = count
             self._args['host']   = ca.host_name(self.chid)
             self.ftype  = ca.promote_type(self.chid,
                                           use_ctrl= self.form == 'ctrl',
                                           use_time= self.form == 'time')
+
             _ftype_ = dbr.Name(self.ftype).lower()
             self._args['type'] = _ftype_
             self._args['typefull'] = _ftype_
@@ -230,6 +241,9 @@ class PV(object):
                 conn_cb(pvname=self.pvname, conn=conn, pv=self)
             elif not conn and self.verbose:
                 ca.write("PV '%s' disconnected." % pvname)
+
+        # pv end of connect, force a read of access rights
+        self.force_read_access_rights()
 
         # waiting until the very end until to set self.connected prevents
         # threads from thinking a connection is complete when it is actually
@@ -264,12 +278,21 @@ class PV(object):
         self._conn_started = True
         return self.connected and self.ftype is not None
 
+    def clear_auto_monitor(self):
+        """turn off auto-monitoring: must reconnect to re-enable monitoring"""
+        self.auto_monitor = False
+        if self._monref is not None:
+            evid = self._monref[2]
+            ca.clear_subscription(evid)
+            self._monref = None
+
     def reconnect(self):
         "try to reconnect PV"
         self.auto_monitor = None
         self._monref = None
         self.connected = False
         self._conn_started = False
+        self.force_connect()
         return self.wait_for_connection()
 
     def poll(self, evt=1.e-4, iot=1.0):
@@ -305,13 +328,13 @@ class PV(object):
             (self._args['value'] is None) or
             (count is not None and count > len(self._args['value']))):
 
-            # respect count argument on subscription also for calls to get 
+            # respect count argument on subscription also for calls to get
             if count is None and self._args['count']!=self._args['nelm']:
                 count = self._args['count']
-                
             ca_get = ca.get
             if ca.get_cache(self.pvname)['value'] is not None:
                 ca_get = ca.get_complete
+
             self._args['value'] = ca_get(self.chid, ftype=self.ftype,
                                          count=count, timeout=timeout,
                                          as_numpy=as_numpy)
@@ -452,6 +475,7 @@ class PV(object):
             return None
         kwds = ca.get_ctrlvars(self.chid, timeout=timeout, warn=warn)
         self._args.update(kwds)
+        self.force_read_access_rights()
         return kwds
 
     def get_timevars(self, timeout=5, warn=True):

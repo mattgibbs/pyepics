@@ -112,33 +112,35 @@ class CASeverityException(Exception):
     def __str__(self):
         return " %s returned '%s'" % (self.fcn, self.msg)
 
-def find_libca():
+
+def _find_lib(inp_lib_name):
     """
     find location of ca dynamic library
     """
     # Test 1: if PYEPICS_LIBCA env var is set, use it.
-    dllpath = os.environ.get('PYEPICS_LIBCA', None)
+    dllpath = os.environ.get(
+        'PYEPICS_LIB{}'.format(inp_lib_name.upper()), None)
     if (dllpath is not None and os.path.exists(dllpath) and
-        os.path.isfile(dllpath)):
+            os.path.isfile(dllpath)):
         return dllpath
 
     # Test 2: look in installed python location for dll
-    lname = 'libca.so'
-    if os.uname == 'nt':
-        lname = 'ca.dll'
+    lname = 'lib{}.so'.format(inp_lib_name)
+    if os.name == 'nt':
+        lname = '{}.dll'.format(inp_lib_name)
     elif sys.platform == 'darwin':
-        lname = 'libca.dylib'
+        lname = 'lib{}.dylib'.format(inp_lib_name)
 
     basepath = os.path.split(os.path.abspath(__file__))[0]
-    parent   = os.path.split(basepath)[0]
-    dllpath  = os.path.join(parent, 'lib', lname)
+    parent = os.path.split(basepath)[0]
+    dllpath = os.path.join(parent, 'lib', lname)
+
     if (os.path.exists(dllpath) and os.path.isfile(dllpath)):
         return dllpath
 
-
     # Test 3: look through Python path and PATH env var for dll
     path_sep = ':'
-    dylib   = 'lib'
+    dylib = 'lib'
     # For windows, we assume the DLLs are installed with the library
     if os.name == 'nt':
         path_sep = ';'
@@ -151,33 +153,43 @@ def find_libca():
              os.path.split(os.path.dirname(os.__file__))[0],
              os.path.join(sys.prefix, dylib)]
 
+    def envpath2list(envname, path_sep):
+        plist = ['']
+        try:
+            plist = os.environ.get(envname, '').split(path_sep)
+        except AttributError:
+            pass
+        return plist
+
+    env_path = envpath2list('PATH', path_sep)
+    ldname = 'LD_LIBRARY_PATH'
+    if sys.platform == 'darwin':
+        ldname = 'DYLD_LIBRARY_PATH'
+    env_ldpath = envpath2list(ldname, path_sep)
+
     search_path = []
-    for adir in (_path + sys.path +
-                 os.environ.get('PATH','').split(path_sep) +
-                 os.environ.get('LD_LIBRARY_PATH','').split(path_sep) +
-                 os.environ.get('DYLD_LIBRARY_PATH','').split(path_sep)):
+    for adir in (_path + env_path + env_ldpath):
         if adir not in search_path and os.path.isdir(adir):
             search_path.append(adir)
 
     os.environ['PATH'] = path_sep.join(search_path)
-
     # with PATH set above, the ctypes utility, find_library *should*
     # find the dll....
-    dllpath  = ctypes.util.find_library('ca')
+    dllpath = ctypes.util.find_library(inp_lib_name)
     if dllpath is not None:
         return dllpath
-
 
     # Test 4: on unixes, look expliticly with EPICS_BASE env var and
     # known architectures for ca.so
     if os.name == 'posix':
-        known_hosts = {'Linux':   ('linux-x86', 'linux-x86_64') ,
-                       'Darwin':  ('darwin-ppc', 'darwin-x86'),
-                       'SunOS':   ('solaris-sparc', 'solaris-sparc-gnu') }
+        known_hosts = {'Linux': ('linux-x86', 'linux-x86_64'),
+                       'Darwin': ('darwin-ppc', 'darwin-x86'),
+                       'SunOS': ('solaris-sparc', 'solaris-sparc-gnu')
+                       }
 
-        libname = 'libca.so'
+        libname = 'lib{}.so'.format(inp_lib_name)
         if sys.platform == 'darwin':
-            libname = 'libca.dylib'
+            libname = 'lib{}.dylib'.format(inp_lib_name)
 
         epics_base = os.environ.get('EPICS_BASE', '.')
         epics_host_arch = os.environ.get('EPICS_HOST_ARCH')
@@ -192,6 +204,13 @@ def find_libca():
                     return os.path.join(adir, libname)
 
     raise ChannelAccessException('cannot find Epics CA DLL')
+
+
+def find_libca():
+    return _find_lib('ca')
+
+def find_libCom():
+    return _find_lib('Com')
 
 def initialize_libca():
     """Initialize the Channel Access library.
@@ -221,13 +240,16 @@ def initialize_libca():
     if 'EPICS_CA_MAX_ARRAY_BYTES' not in os.environ:
         os.environ['EPICS_CA_MAX_ARRAY_BYTES'] = "%i" %  2**24
 
-    dllname = find_libca()
-    load_dll = ctypes.cdll.LoadLibrary
     global libca, initial_context, _cache
+
     if os.name == 'nt':
         load_dll = ctypes.windll.LoadLibrary
+    else:
+        load_dll = ctypes.cdll.LoadLibrary
     try:
-        libca = load_dll(dllname)
+        # force loading the chosen version of libCom
+        load_dll(find_libCom())
+        libca = load_dll(find_libca())
     except Exception as exc:
         raise ChannelAccessException('loading Epics CA DLL failed: ' + str(exc))
 
@@ -254,7 +276,14 @@ def initialize_libca():
 
     # save value offests used for unpacking
     # TIME and CTRL data as an array in dbr module
-    dbr.value_offset = (39*ctypes.c_short).in_dll(libca,'dbr_value_offset')
+
+    # in_dll is not available for arrays in IronPython, so use a reference to the first element
+    if dbr.IRON_PYTHON:
+	    value_offset0 = ctypes.c_short.in_dll(libca,'dbr_value_offset')
+	    dbr.value_offset = ctypes.cast(ctypes.addressof(value_offset0), (39*ctypes.c_short))
+    else:
+        dbr.value_offset = (39*ctypes.c_short).in_dll(libca,'dbr_value_offset')
+
     initial_context = current_context()
     if AUTO_CLEANUP:
         atexit.register(finalize_libca)
@@ -603,7 +632,10 @@ def _onGetEvent(args, **kws):
     if args.status != dbr.ECA_NORMAL:
         return
 
-    get_cache(name(args.chid))[args.usr] = memcopy(dbr.cast_args(args))
+    if dbr.IRON_PYTHON:
+        get_cache(name(args.chid))[args.usr.value] = (dbr.cast_args(args))
+    else:
+        get_cache(name(args.chid))[args.usr] = memcopy(dbr.cast_args(args))
 
 
 ## put event handler:
@@ -628,6 +660,7 @@ def _onPutEvent(args, **kwds):
 
 def _onAccessRightsEvent(args):
     # for 64-bit python on Windows!
+    global _cache
     if dbr.PY64_WINDOWS:
         args = args.contents
 
@@ -635,7 +668,6 @@ def _onAccessRightsEvent(args):
     ra = bool(args.read_access)
     wa = bool(args.write_access)
 
-    global _cache
     # Getting bunk result from ca.current_context on channel disconnect
     # Do this the long way...
     for ctx in _cache.values():
@@ -648,14 +680,6 @@ def _onAccessRightsEvent(args):
                         callback(ra, wa)
 
 # create global reference to these callbacks
-
-
-# _CB_PUTWAIT = ctypes.CFUNCTYPE(None, dbr.event_handler_args)(_onPutEvet)
-# _CB_GET     = ctypes.CFUNCTYPE(None, ctypes.pointer(dbr.event_handler_args))(_onGetEvent)
-# _CB_EVENT   = ctypes.CFUNCTYPE(None, dbr.event_handler_args)(_onMonitorEvent)
-
-# _CB_CONNECT = make_callback(_onConnectionEvent, dbr.connection_args)
-
 _CB_CONNECT = dbr.make_callback(_onConnectionEvent, dbr.connection_args)
 _CB_PUTWAIT = dbr.make_callback(_onPutEvent,        dbr.event_handler_args)
 _CB_GET     = dbr.make_callback(_onGetEvent,        dbr.event_handler_args)
@@ -899,7 +923,7 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
         chid = _cache[ctx][pvname]['chid']
     else:
         chid = dbr.chid_t()
-        ret = libca.ca_create_channel(pvn, conncb, 0, 0,
+        ret = libca.ca_create_channel(ctypes.c_char_p(pvn), conncb, 0, 0,
                                       ctypes.byref(chid))
         PySEVCHK('create_channel', ret)
         entry['chid'] = chid
@@ -1030,7 +1054,6 @@ def write_access(chid):
 @withCHID
 def field_type(chid):
     "return the integer DBR field type."
-    # print(" Field Type", chid)
     return libca.ca_field_type(chid)
 
 @withCHID
@@ -1376,7 +1399,12 @@ def put(chid, value, wait=False, timeout=30, callback=None,
     if count > 1:
         # check that data for array PVS is a list, array, or string
         try:
-            count = min(len(value), count)
+            if ftype == dbr.STRING and is_string_or_bytes(value):
+                # len('abc') --> 3, however this is one element for dbr.STRING ftype
+                count = 1
+            else:
+                count = min(len(value), count)
+
             if count == 0:
                 count = nativecount
         except TypeError:
@@ -1390,9 +1418,9 @@ def put(chid, value, wait=False, timeout=30, callback=None,
     if is_string(value):
         value = ascii_string(value)
 
-    data  = (count*dbr.Map[ftype])()
+    data = (count*dbr.Map[ftype])()
     if ftype == dbr.STRING:
-        if count == 1:
+        if is_string_or_bytes(value):
             data[0].value = value
         else:
             for elem in range(min(count, len(value))):

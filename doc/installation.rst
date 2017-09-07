@@ -5,19 +5,16 @@ Downloading and Installation
 Prerequisites
 ~~~~~~~~~~~~~~~
 
-This package requires Python version 2.7, 3.4, or 3.5.  It should work with
-Python 2.6, 3.2, or 3.3, but these are no longer being tested regularly.
+This package requires Python version 2.7, 3.5, or 3.6.  It may
+work with Python 2.6, 3.2, 3.3, or 3.4, but these are no longer being
+tested regularly.
 
-In addition, version 3.14 of the EPICS Channel Access library (v 3.14.8 or
-higher, I believe) is required.  More specifically, the shared libraries
-libCom.so and libca.so (or Com.dll and ca.dll on Windows) from *Epics Base*
-are required to use this module.  Using version 3.14.12 or higher is
-recommended -- some of the features for 'subarray records' will only work
-with this 3.14.12 and higher. For Linux and Mac OS X (and other Unix-like
-systems), these dynamic libraries are assumed to be available, and findable
-by Python at runtime. This may mean you have to set environmental variables
-such as PATH, LD_LIBRARY_PATH, or DYLD_LIBRARY_PATH or using Linux tools
-such as ldconfig.
+In addition, version 3.14 of the EPICS Channel Access library (v
+3.14.8 or higher, I believe) is required.  More specifically, the
+shared libraries libCom.so and libca.so (or Com.dll and ca.dll on
+Windows) from *Epics Base* are required to use this module.  Using
+version 3.14.12 or higher is recommended -- some of the features for
+'subarray records' will only work with this 3.14.12 and higher.
 
 For 32-bit Python on 32-bit or 64-bit Windows, pre-built DLLs from 3.14.12
 (patched as of March, 2011) are included and installed so that no other
@@ -26,6 +23,18 @@ Epics installation is required to use the modules.
 For 64-bit Python on 64-bit Windows, pre-built DLLs from 3.14.12.4 (patched
 as of January, 2015) are also included.  Support for 64-bit Python on
 Windows was new in version 3.2.4, and requires Python version 2.7.9.
+
+For 32-bit, 64-bit Linux and 64-bit OSX binaries are also included.
+
+If you have epics-base already installed on your machine you can
+suppress installing the binaries set the env `NOLIBCA` ::
+
+  NOLIBCA=1 pip install pyepics
+
+You may have to set environmental variables such as PATH,
+LD_LIBRARY_PATH, or DYLD_LIBRARY_PATH or using Linux tools such as
+ldconfig to find the required libraries.
+
 
 The Python `numpy module <http://numpy.scipy.org/>`_ is highly recommended,
 though it is not strictly required. If available, it will be used to
@@ -41,18 +50,18 @@ Downloads and Installation
 .. _pyepics CARS downloads:       http://cars9.uchicago.edu/software/python/pyepics3/src/
 
 
-The latest stable version of the PyEpics Package is 3.2.5.  Source code
-kits and Windows installers can be found at either `pyepics PyPI`_ or
-`pyepics CARS downloads`_ site.  With `Python Setup Tools`_ now standard
-for Python 2.7 and abouve, the simplest way to install the pyepics is
-with::
+The latest stable version of the PyEpics Package is 3.2.7.  Source
+code kits and Windows installers can be found at either `pyepics
+PyPI`_ or `pyepics CARS downloads`_ site.  With `Python Setup Tools`_
+now standard for Python 2.7 and abouve, the simplest way to install
+the pyepics is with::
 
      pip install pyepics
 
 If you're using Anaconda, there are a few conda channels for pyepics,
 including::
 
-     conda install -c https://conda.anaconda.org/newville pyepics
+     conda install -c https://conda.anaconda.org/GSECARS pyepics
 
 
 Getting Started, Setting up the Epics Environment
@@ -93,7 +102,7 @@ included in the installation kit, and should be automatically installed to
 where they can be found at runtime (following rule 3 above).  If they are
 not found (or another version is found that conflicts),  you should copy
 them to a place where they can be found, such as the Python DLLs folder,
-which might be something like ``C:\Python27\DLLs``.
+which might be something like ``C:\Python36\DLLs``.
 
 For more details, especially about how to set paths for LD_LIBRARY_PATH or
 DYLD_LIBRARY_PATH on Unix-like systems, see the INSTALL file.
