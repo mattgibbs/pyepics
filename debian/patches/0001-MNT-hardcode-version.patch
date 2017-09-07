@@ -16,7 +16,7 @@ index c6fc313..6640174 100644
 -from ._version import get_versions
 -__version__ = get_versions()['version']
 -del get_versions
-+__version__ = '3.2.6'
++__version__ = '3.2.7'
  
  __doc__ = """
     epics channel access python module
