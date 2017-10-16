@@ -15,14 +15,13 @@ matrix:
     # do not install libca / libcom from pyepics
     - python: 2.7
       env: NOLIBCA=1
-    - python: 3.4
-      env: NOLIBCA=1
     - python: 3.5
       env: NOLIBCA=1
     - python: 3.6
       env: NOLIBCA=1
     # install libca / libcom from pyepics
     - python: 2.7
+    - python: 3.5
     - python: 3.6
 
 before_install:
@@ -35,7 +34,6 @@ before_install:
   - export CONDA_ENV="testenv"
 
   - perl --version
-  - git fetch --unshallow
   - docker pull ${DOCKERIMAGE}:${DOCKERTAG}
   - docker images
   - docker ps -a
@@ -46,22 +44,16 @@ before_install:
   - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
   - chmod +x miniconda.sh
   - "./miniconda.sh -b -p /home/travis/mc"
+  - if [ -n "$NOLIBCA" ]; then export PYEPICS_LIBCA=$HOME/mc/envs/$CONDA_ENV/lib/libca.so; fi
   - env
 
   - export PATH=/home/travis/mc/bin:$PATH
   - conda config --set always_yes true
   - conda update conda --yes
-  - conda install conda-build anaconda-client jinja2
   - conda config --add channels lightsource2-tag
-  - conda config --add channels lightsource2
-  - conda config --add channels soft-matter
 
   # MAKE THE CONDA RECIPE
   - conda create -n $CONDA_ENV python=$TRAVIS_PYTHON_VERSION epics-base
-  - source activate $CONDA_ENV
-
-  # need to reactivate after installing epics-base so that the EPICS_BASE env
-  # var is set
   - source activate $CONDA_ENV
 
 install:
@@ -70,13 +62,6 @@ install:
   - pip install coveralls pytest pytest-cov
   # install pyepics as a source install
   - pip install -v .
-
-  - find /home/travis/mc -name 'libca*'
-
-  # setup some path environment variables for epics
-  - export PATH=$PATH:$EPICS_BASE/bin/$EPICS_HOST_ARCH
-  - export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$EPICS_BASE/lib/$EPICS_HOST_ARCH"
-  - echo "PATH=$PATH"
 
   # allow gdb backtrace to show when tests fail
   - sudo apt-get -y install gdb
@@ -87,11 +72,11 @@ before_script:
   - ulimit -c unlimited -S
 
 script:
+  - cd tests
   # check/record some basic pyepics things
   - echo "Checking pyepics version and libca locations:"
   - python -c "import epics; print(epics.__version__)"
   - python -c "import epics.ca; print(epics.ca.find_libca())"
-  - ldd /home/travis/mc/envs/testenv/lib/libca.so
 
   - echo "Checking if the motor/areadetector IOC is running:"
   - python -c "import epics; print('mtr1', epics.caget('sim:mtr1.RBV'))"
@@ -104,7 +89,7 @@ script:
   - caget Py:long1
 
   # running tests
-  - py.test -vv --cov=epics --cov-report term-missing tests/ca_unittest.py tests/pv_unittest.py tests/test_pool.py tests/test_threading.py tests/test_cas.py || RESULT=$?
+  - py.test -vv -rsx --cov=epics --cov-report term-missing test_install.py ca_unittest.py pv_unittest.py test_pool.py test_threading.py test_cas.py || RESULT=$?
   - if [[ ${RESULT} != 0 ]]; then gdb python core* -ex "thread apply all bt" -ex "set pagination 0" -batch; fi
   - if [[ ${RESULT} != 0 ]]; then exit $RESULT ; fi;
 

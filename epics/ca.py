@@ -23,10 +23,11 @@ from  math import log10
 import atexit
 import warnings
 from threading import Thread
+from pkg_resources import resource_filename
 
 from .utils import (STR2BYTES, BYTES2STR, NULLCHAR, NULLCHAR_2,
                     strjoin, memcopy, is_string, is_string_or_bytes,
-                    ascii_string)
+                    ascii_string, clib_search_path)
 
 # ignore warning about item size... for now??
 warnings.filterwarnings('ignore',
@@ -118,22 +119,19 @@ def _find_lib(inp_lib_name):
     find location of ca dynamic library
     """
     # Test 1: if PYEPICS_LIBCA env var is set, use it.
-    dllpath = os.environ.get(
-        'PYEPICS_LIB{}'.format(inp_lib_name.upper()), None)
+    dllpath = os.environ.get('PYEPICS_LIBCA', None)
+
+    # find libCom.so *next to* libca.so if PYEPICS_LIBCA was set
+    if dllpath is not None and inp_lib_name != 'ca':
+        _parent, _name = os.path.split(dllpath)
+        dllpath = os.path.join(_parent, _name.replace('ca', inp_lib_name))
+    
     if (dllpath is not None and os.path.exists(dllpath) and
             os.path.isfile(dllpath)):
         return dllpath
 
     # Test 2: look in installed python location for dll
-    lname = 'lib{}.so'.format(inp_lib_name)
-    if os.name == 'nt':
-        lname = '{}.dll'.format(inp_lib_name)
-    elif sys.platform == 'darwin':
-        lname = 'lib{}.dylib'.format(inp_lib_name)
-
-    basepath = os.path.split(os.path.abspath(__file__))[0]
-    parent = os.path.split(basepath)[0]
-    dllpath = os.path.join(parent, 'lib', lname)
+    dllpath = resource_filename('epics.clibs', clib_search_path(inp_lib_name))
 
     if (os.path.exists(dllpath) and os.path.isfile(dllpath)):
         return dllpath
@@ -178,30 +176,6 @@ def _find_lib(inp_lib_name):
     dllpath = ctypes.util.find_library(inp_lib_name)
     if dllpath is not None:
         return dllpath
-
-    # Test 4: on unixes, look expliticly with EPICS_BASE env var and
-    # known architectures for ca.so
-    if os.name == 'posix':
-        known_hosts = {'Linux': ('linux-x86', 'linux-x86_64'),
-                       'Darwin': ('darwin-ppc', 'darwin-x86'),
-                       'SunOS': ('solaris-sparc', 'solaris-sparc-gnu')
-                       }
-
-        libname = 'lib{}.so'.format(inp_lib_name)
-        if sys.platform == 'darwin':
-            libname = 'lib{}.dylib'.format(inp_lib_name)
-
-        epics_base = os.environ.get('EPICS_BASE', '.')
-        epics_host_arch = os.environ.get('EPICS_HOST_ARCH')
-        host_arch = os.uname()[0]
-        if host_arch in known_hosts:
-            epicspath = [os.path.join(epics_base, 'lib', epics_host_arch)] if epics_host_arch else []
-            for adir in known_hosts[host_arch]:
-                epicspath.append(os.path.join(epics_base, 'lib', adir))
-        for adir in search_path + epicspath:
-            if os.path.exists(adir) and os.path.isdir(adir):
-                if libname in os.listdir(adir):
-                    return os.path.join(adir, libname)
 
     raise ChannelAccessException('cannot find Epics CA DLL')
 
@@ -248,7 +222,8 @@ def initialize_libca():
         load_dll = ctypes.cdll.LoadLibrary
     try:
         # force loading the chosen version of libCom
-        load_dll(find_libCom())
+        if os.name == 'nt':
+            load_dll(find_libCom())
         libca = load_dll(find_libca())
     except Exception as exc:
         raise ChannelAccessException('loading Epics CA DLL failed: ' + str(exc))
@@ -279,8 +254,9 @@ def initialize_libca():
 
     # in_dll is not available for arrays in IronPython, so use a reference to the first element
     if dbr.IRON_PYTHON:
-	    value_offset0 = ctypes.c_short.in_dll(libca,'dbr_value_offset')
-	    dbr.value_offset = ctypes.cast(ctypes.addressof(value_offset0), (39*ctypes.c_short))
+        value_offset0 = ctypes.c_short.in_dll(libca,'dbr_value_offset')
+        dbr.value_offset = ctypes.cast(ctypes.addressof(value_offset0),
+                                       (39*ctypes.c_short))
     else:
         dbr.value_offset = (39*ctypes.c_short).in_dll(libca,'dbr_value_offset')
 
@@ -325,7 +301,7 @@ def finalize_libca(maxtime=10.0):
             flush_count += 1
         context_destroy()
         libca = None
-    except StandardError:
+    except Exception:
         pass
     time.sleep(0.01)
 
