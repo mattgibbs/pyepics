@@ -1,3 +1,75 @@
+pyepics (3.3.0-1) unstable; urgency=low
+
+  [ Daron Chabot ]
+  * MNT: move clib dir
+  * ENH: use package_data to install c libs
+  * FIX: make clibs a pkg
+  * MNT: refactor c lib path discovery
+  * FIX: NOLIBCA case
+  * CLN: legacy lib search method
+  * CLN: misleading installation text
+  * TST: do not exec tests from source dir
+
+  [ Matt Newville ]
+  * fix access rights structure for Py2 and Win64
+
+  [ Daron Chabot ]
+  * TST: make conda libca discoverable if defining NOLIBCA
+  * BUG: search and load libca only
+  * CLN/TST: debug statements
+  * CLN/TST: remove support for excised code path
+  * CLN/TST: conda channels
+  * CLN/TST: unnecessary conda installs
+  * CLN/TST: unnecessary conda env activation
+  * CLN/TST: why?
+  * TST: matrix versions
+  * TST: library installation
+  * MNT: swallow process shutdown errors
+
+  [ Matt Newville ]
+  * return loading of libCom (needed on Windows!)
+  * need to preload libCom on Windows
+  * use PYEPICS_LIBCA to point toward location of libCom
+  * add AutoSaver class for better repeated saves
+
+  [ Matthew Newville ]
+  * tweaks to AutoSaver code and add docs
+
+  [ Daron Chabot ]
+  * FIX: osx rpath in libca
+  * MNT: do attempt disconnect if libca is None
+
+  [ Matthew Newville ]
+  * fix typo
+
+  [ Hugo Slepicka ]
+  * FIX: Removing StandardError
+
+  [ Matt Newville ]
+  * fix simple typo
+
+  [ Daron Chabot ]
+  * DOC: CI testing python versions
+  * DOC: quick installation details
+  * DOC: convert to markdown
+  * DOC: badges
+  * DOC: code block hightlighting
+  * DOC: list formatting
+  * DOC: formatting
+  * DOC: content
+  * DOC: headings
+
+  [ Matt Newville ]
+  * doc changes for 3.3.0
+
+  [ Matthew Newville ]
+  * doc tweaks
+  * update install doc
+  * more doc tweaks
+  * ran spellchecker (much needed)
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Mon, 16 Oct 2017 16:45:29 -0400
+
 pyepics (3.2.7-2) unstable; urgency=low
 
   * MNT: avoid prefab libs
