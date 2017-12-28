@@ -1,3 +1,10 @@
+pyepics (3.3.0-2) unstable; urgency=low
+
+  * BLD: reissue version number patch
+  * BLD: python3 pkging
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 28 Dec 2017 11:48:27 -0500
+
 pyepics (3.3.0-1) unstable; urgency=low
 
   [ Daron Chabot ]
