@@ -1,3 +1,9 @@
+pyepics (3.3.0-3) unstable; urgency=low
+
+  * FIX: runtime dep
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 28 Dec 2017 16:31:37 -0500
+
 pyepics (3.3.0-2) unstable; urgency=low
 
   * BLD: reissue version number patch
