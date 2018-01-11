@@ -1,3 +1,36 @@
+pyepics (3.3.1-1) unstable; urgency=low
+
+  [ Matt Gibbs ]
+  * Improve/document caget_multi method, add ability for caget to accept lists and pass to caget_multi.
+  * Doc formatting tweak.
+  * Move caget_many documentation further down to indicate its relative unimportance.
+  * Add missing comma.
+  * Accept tuples of PV names in caget_many as well.
+  * Add a basic unit test for caget_many.
+  * Fix minor doc typo ('of' -> 'or').
+  * Add a caput_many function, with documentation and a unit test.
+  * Implement waiting for each PV in a caput_many, or waiting for all PVs.
+  * Update docs for caput_many changes.
+  * Remove caget calling caget_many if handed a collection of PVs.
+  * Simplify caput_many by re-implementing with PV objects.
+  * Remove a line about auto-monitoring that didn't make any sense in caget_many and caput_many.
+
+  [ Joshua Adelman ]
+  * Fix MANIFEST.in to correct license file name
+
+  [ Daron Chabot ]
+  * BUG: install all the libs
+
+  [ Matthew Newville ]
+  * update docs for caget_many() and discussion of getting many PV values
+  * more updates to doc for caget/caput/... interface
+  * tweaks to install doc, use sphinx release directive
+
+  [ Daron Chabot ]
+  * BLD: bump version in patch
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 11 Jan 2018 11:23:24 -0500
+
 pyepics (3.3.0-3) unstable; urgency=low
 
   * FIX: runtime dep
