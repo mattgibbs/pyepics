@@ -1,4 +1,4 @@
-From 42ee55a273331dc1edcfcd8baf415f694e1d254d Mon Sep 17 00:00:00 2001
+From 1e26e4201f2424402501a0071df9613c5452a153 Mon Sep 17 00:00:00 2001
 From: Daron Chabot <chabot@frib.msu.edu>
 Date: Thu, 18 May 2017 10:38:31 -0400
 Subject: [PATCH] MNT: hardcode version
@@ -9,19 +9,19 @@ Subject: [PATCH] MNT: hardcode version
  2 files changed, 3 insertions(+), 6 deletions(-)
 
 diff --git a/epics/__init__.py b/epics/__init__.py
-index c6fc313..a2b65d9 100644
+index 0d57c08..09e96a8 100644
 --- a/epics/__init__.py
 +++ b/epics/__init__.py
 @@ -1,6 +1,4 @@
 -from ._version import get_versions
 -__version__ = get_versions()['version']
 -del get_versions
-+__version__ = '3.3.0'
++__version__ = '3.3.1'
  
  __doc__ = """
     epics channel access python module
 diff --git a/setup.py b/setup.py
-index cbd4ae0..00adb3e 100644
+index 431b9f0..fefa4c5 100644
 --- a/setup.py
 +++ b/setup.py
 @@ -7,7 +7,7 @@ import sys
