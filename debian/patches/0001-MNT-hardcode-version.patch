@@ -16,7 +16,7 @@ index 0d57c08..09e96a8 100644
 -from ._version import get_versions
 -__version__ = get_versions()['version']
 -del get_versions
-+__version__ = '3.3.1'
++__version__ = '3.3.2'
  
  __doc__ = """
     epics channel access python module
