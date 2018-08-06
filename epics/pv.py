@@ -41,17 +41,12 @@ def get_pv(pvname, form='time',  connect=False,
             thispv = _PVcache_[(pvname, form, context)]
 
     start_time = time.time()
-    # not cached -- create pv (automaticall saved to cache)
+    # not cached -- create pv (automatically saved to cache)
     if thispv is None:
         thispv = PV(pvname, form=form, **kws)
 
     if connect:
-        thispv.wait_for_connection()
-        while not thispv.connected:
-            ca.poll()
-            if time.time()-start_time > timeout:
-                break
-        if not thispv.connected:
+        if not thispv.wait_for_connection(timeout=timeout):
             ca.write('cannot connect to %s' % pvname)
     return thispv
 
@@ -162,10 +157,10 @@ class PV(object):
         self._args['chid'] = self.chid = chid
         self.__on_connect(pvname=pvname, chid=chid, conn=conn, **kws)
 
-    def force_read_access_rights(self): 
-        """force a read of access rights, not relying 
+    def force_read_access_rights(self):
+        """force a read of access rights, not relying
         on last event callback.
-        Note: event callback seems to fail sometimes, 
+        Note: event callback seems to fail sometimes,
         at least on initial connection on Windows 64-bit.
         """
         self._args['access'] = ca.access(self.chid)
@@ -227,8 +222,9 @@ class PV(object):
                 # (ie dbr.DBE_ALARM|dbr.DBE_LOG) by passing it as the
                 # auto_monitor arg, otherwise if you specify 'True' you'll
                 # just get the default set in ca.DEFAULT_SUBSCRIPTION_MASK
-                mask = None
-                if isinstance(self.auto_monitor, int):
+                if self.auto_monitor is True:
+                    mask = ca.DEFAULT_SUBSCRIPTION_MASK
+                else:
                     mask = self.auto_monitor
                 self._monref = ca.create_subscription(self.chid,
                                          use_ctrl=(self.form == 'ctrl'),
@@ -340,7 +336,7 @@ class PV(object):
                                          as_numpy=as_numpy)
         val = self._args['value']
         if as_string:
-            return self._set_charval(val)
+            return self._set_charval(val, force_long_string=as_string)
         if self.count <= 1 or val is None:
             return val
 
@@ -398,7 +394,7 @@ class PV(object):
         "null put-calback, so that the put_complete attribute is valid"
         pass
 
-    def _set_charval(self, val, call_ca=True):
+    def _set_charval(self, val, call_ca=True, force_long_string=False):
         """ sets the character representation of the value.
         intended only for internal use"""
         if val is None:
@@ -410,7 +406,8 @@ class PV(object):
             self._args['char_value'] = val
             return val
         # char waveform as string
-        if ntype == dbr.CHAR and self.count < ca.AUTOMONITOR_MAXLENGTH:
+        if ntype == dbr.CHAR and (self.count < ca.AUTOMONITOR_MAXLENGTH or
+                force_long_string is True):
             if ca.HAS_NUMPY and isinstance(val, ca.numpy.ndarray):
                 # a numpy array
                 val = val.tolist()
