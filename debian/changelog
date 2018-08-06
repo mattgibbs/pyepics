@@ -1,3 +1,35 @@
+pyepics (3.3.2-1) unstable; urgency=low
+
+  [ Matt Newville ]
+  * remove poll() even in connection_callback is set -- very slow on Windows64
+  * update Motor _init_list of starting attributes
+
+  [ Matthew Newville ]
+  * add waits and slight delay to no_simulator_updates for pv_unittest
+
+  [ Matt Newville ]
+  * add posixseconds/nanoseconds to output of get_timevars()
+  * Py3 / wxPython4 fixes
+  * fixes for Python3 / wxPython 4
+  * more fixes for Python 3 / wxPython 4
+  * fix motorpanel for Python 3 / wxPython 4
+  * allow ca.create_subscription() on unconnected channels
+  * promote_type needs connected chid
+  * fix ftype test
+  * add promote_fieldtype, trying more improvements to create_subscription
+  * add timeout to create_subscription
+  * need to forward use_time/use_ctrl
+
+  [ Daron Chabot ]
+  * BUG: set default subscription mask to VALUE|ALARM
+  * ENH: respect formatting iff as_string is True
+  * MNT: naming
+
+  [ Bruno Martins ]
+  * Deal with timeouts the same way in caget, caput and camonitor
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Mon, 06 Aug 2018 13:44:02 -0400
+
 pyepics (3.3.1-1) unstable; urgency=low
 
   [ Matt Gibbs ]
