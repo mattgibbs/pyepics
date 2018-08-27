@@ -1,3 +1,16 @@
+pyepics (3.3.3-1) unstable; urgency=low
+
+  [ Bruno Martins]
+  * Fix wait_for_connection timeout
+
+  [ Matt Newville ]
+  * add libca and libCom for linux arm / rpi architecture
+  * test for ARM processor in deciding linux shared libs
+  * add linuxarm shared lib install
+  * linuxarm shared libraries applying patch for Channel-write-request-failed to base 3.16.1
+
+ -- Bruno Martins <martins@frib.msu.edu>  Mon, 27 Aug 2018 13:33:47 -0400
+
 pyepics (3.3.2-1) unstable; urgency=low
 
   [ Matt Newville ]

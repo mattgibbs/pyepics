@@ -16,8 +16,8 @@ index 0d57c08..09e96a8 100644
 -from ._version import get_versions
 -__version__ = get_versions()['version']
 -del get_versions
-+__version__ = '3.3.2'
- 
++__version__ = '3.3.3'
+
  __doc__ = """
     epics channel access python module
 diff --git a/setup.py b/setup.py
@@ -27,15 +27,15 @@ index 431b9f0..fefa4c5 100644
 @@ -7,7 +7,7 @@ import sys
  import epics
  import shutil
- 
+
 -import versioneer
 +import epics
- 
+
  long_desc = '''Python Interface to the Epics Channel Access protocol
  of the Epics control system.   PyEpics provides 3 layers of access to
 @@ -57,8 +57,7 @@ if PY_MAJOR == 2 and PY_MINOR < 6:
                  pjoin('epics', 'utils3.py'))
- 
+
  setup(name = 'pyepics',
 -      version = versioneer.get_version(),
 -      cmdclass = versioneer.get_cmdclass(),
@@ -43,6 +43,6 @@ index 431b9f0..fefa4c5 100644
        author       = 'Matthew Newville',
        author_email = 'newville@cars.uchicago.edu',
        url          = 'http://pyepics.github.io/pyepics/',
--- 
+--
 2.1.4
 
