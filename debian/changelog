@@ -1,3 +1,99 @@
+pyepics (3.4.0-1) UNRELEASED; urgency=low
+
+  [ Daron Chabot ]
+  * BLD: do not run test suite
+
+  [ K Lauer ]
+  * ENH: on PV.get(), update all CTRL/STS/TIME metadata
+  * DOC: add docstrings for get_*_with_metadata functions
+  * TST: skip CAPool tests on py3k
+  * ENH: add PV.get_with_metadata
+  * FIX: fix for with_ctrlvars in get_with_metadata
+  * FIX: case where _args['value'] is None or a scalar
+  * FIX: get_with_metadata should return dictionary, not value
+  * DOC: include PV.get_with_metadata
+  * REF: get_timevars should also use _unpack_metadata
+  * ENH: support as_namespace kwarg in get_with_metadata
+  * TST: test get_with_metadata and as_namespace
+  * FIX: use argparse.Namespace on Python 2.7
+
+  [ Matthew Newville ]
+  * update linux64 shared libs
+  *  update linux32 shared libs
+  * update linux arm shared libs
+  * update darwin64 dylibs for base 3.16.2
+  * update darwin64 dylibs for base 3.16.2
+  * add windows dlls from base 3.16.2
+  * use nelm to determine if a PV is an array, not count: allows 1-element arrays
+  * doc tweaks
+  * more doc updates for 3.3.2
+  * allow no extended data in ca._unpack(), which might happen with (highly not-recommended) sg_get()
+  * remove sg_get() example from docs
+  * more doc updates
+  * fixes for alarm colors in more widgets
+  * bugfix: set alarm colors
+
+  [ Matt Newville ]
+  * py3 fix for xspress3 device
+
+  [ Daron Chabot ]
+  * FIX: race condition
+
+  [ Matthew Newville ]
+  * allow get to return  (as documented) for unconnected Channels
+  * py3 fixes for simulator
+  * change test so that ca.get(unconnected_pv) is None
+  * add withMabyeConnectedCHID decorator: try to connect, but do not raise error for an unconnected PV
+
+  [ Thomas A Caswell ]
+  * FIX: spell AttributeError correctly
+
+  [ K Lauer ]
+  * REF: use functools.wraps
+  * REF: Add and fix test pv_unittest.test_multithreaded_put_complete
+  * REF/FIX: PV.put_complete is None if no valid request
+  * TST: add multithreaded get test which fails on master
+  * REF: refactor get_timevars, get_ctrlvars using get_with_metadata
+  * REF: rework caching system to be more threadsafe
+  * TST: move multithreaded test to pv_unittest
+  * REF/API: ensure get failures propagate to the user
+  * DOC: function name swapped
+  * FIX: do not update get_results without lock
+  * FIX: some carried-over cache logic seemed incorrect
+  * REF: get_result list -> get_complete always sees same request
+  * REF: GET_PENDING class tweaks (add repr, docstring)
+  * CLN: unused import
+  * MNT: post-rebase fixup
+  * CLN: remove no longer accurate comment
+  * REF: remove namecache
+  * REF: further simplify cache, guard against KeyErrors
+  * MNT: move out Windows 64-compat into callback wrapper
+  * REF: move callback fix to dbr.make_callback
+  * FIX: ensure get_cache return value is not None
+  * REF: break _get_or_create_cache_item into 2 functions
+  * DOC: tweak docstrings
+  * FIX: timestamp -> ts
+  * MNT: remove undefined raise_on_unconnected
+  * FIX: get_with_metadata can return None
+  * TST: add test_force_connect based on #68
+  * REF: add _ensure_context decorator
+  * MNT: add _ensure_context to force_connect, events/callbacks
+  * MNT: remove stale comment
+  * FIX: do not reset auto_monitor when reconnecting
+  * CLN: remove unused variable
+  * MNT: revert auto_monitor=False in clear_auto_monitor
+  * REF/ENH: allow PV.auto_monitor to be changed at any time
+  * FIX: callbacks should be cleared in place
+  * MNT: rearrange disconnect logic
+  * DOC: _check_auto_monitor
+
+  [ Daron Chabot ]
+  * BLD: tweak patch
+  * BLD: standards, compat version bumps
+  * BLD: lintian appeasement
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 02 May 2019 12:24:41 -0400
+
 pyepics (3.3.3-1) unstable; urgency=low
 
   [ Bruno Martins]
