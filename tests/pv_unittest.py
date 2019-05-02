@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 # unit-tests for ca interface
 
-import os
 import sys
 import time
 import unittest
 import numpy
+import threading
+import pytest
+
 from contextlib import contextmanager
 from epics import PV, caput, caget, caget_many, caput_many, ca
 
@@ -85,8 +87,8 @@ class PV_Tests(unittest.TestCase):
         self.assertEqual(success[0], 1)
         self.assertEqual(success[1], 1)
         self.failUnless(success[2] < 0)
-        
-    
+
+
     def test_caput_many_wait_each(self):
         write('Simple Test of caput_many() function, waiting for each.\n')
         pvs = [pvnames.double_pv, pvnames.enum_pv, 'ceci nest pas une PV']
@@ -119,6 +121,30 @@ class PV_Tests(unittest.TestCase):
             cval = pv.get(as_string=True)
 
             self.failUnless(int(cval)== val)
+
+    def test_get_with_metadata(self):
+        with no_simulator_updates():
+            pv = PV(pvnames.int_pv, form='native')
+
+            # Request time type
+            md = pv.get_with_metadata(use_monitor=False, form='time')
+            assert 'timestamp' in md
+            assert 'lower_ctrl_limit' not in md
+
+            # Request control type
+            md = pv.get_with_metadata(use_monitor=False, form='ctrl')
+            assert 'lower_ctrl_limit' in md
+            assert 'timestamp' not in md
+
+            # Use monitor: all metadata should come through
+            md = pv.get_with_metadata(use_monitor=True)
+            assert 'timestamp' in md
+            assert 'lower_ctrl_limit' in md
+
+            # Get a namespace
+            ns = pv.get_with_metadata(use_monitor=True, as_namespace=True)
+            assert hasattr(ns, 'timestamp')
+            assert hasattr(ns, 'lower_ctrl_limit')
 
     def test_get_string_waveform(self):
         write('String Array: \n')
@@ -492,6 +518,96 @@ class PV_Tests(unittest.TestCase):
             print('val is', val, type(val))
             self.assertIsInstance(val, list)
             self.assertEqual(len(val), 1)
+
+
+@pytest.mark.parametrize('num_threads', [1, 10, 200])
+@pytest.mark.parametrize('thread_class', [ca.CAThread, threading.Thread])
+def test_multithreaded_get(num_threads, thread_class):
+    def thread(thread_idx):
+        result[thread_idx] = (pv.get(),
+                              pv.get_with_metadata(form='ctrl')['value'],
+                              pv.get_with_metadata(form='time')['value'],
+                              )
+
+    result = {}
+    ca.use_initial_context()
+    pv = PV(pvnames.double_pv)
+
+    threads = [thread_class(target=thread, args=(i, ))
+               for i in range(num_threads)]
+
+    with no_simulator_updates():
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert len(result) == num_threads
+    print(result)
+    values = set(result.values())
+    assert len(values) == 1
+
+    value, = values
+    assert value is not None
+
+
+@pytest.mark.parametrize('num_threads', [1, 10, 100])
+def test_multithreaded_put_complete(num_threads):
+    def callback(pvname, data):
+        result.append(data)
+
+    def thread(thread_idx):
+        pv.put(thread_idx, callback=callback,
+               callback_data=dict(data=thread_idx),
+               wait=True)
+        time.sleep(0.1)
+
+    result = []
+    ca.use_initial_context()
+    pv = PV(pvnames.double_pv)
+
+    threads = [ca.CAThread(target=thread, args=(i, ))
+               for i in range(num_threads)]
+
+    with no_simulator_updates():
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert len(result) == num_threads
+    print(result)
+    assert set(result) == set(range(num_threads))
+
+
+def test_force_connect():
+    pv = PV(pvnames.double_arrays[0], auto_monitor=True)
+
+    print("Connecting")
+    assert pv.wait_for_connection(5.0)
+
+    print("SUM", pv.get().sum())
+
+    time.sleep(3)
+
+    print("Disconnecting")
+    pv.disconnect()
+    print("Reconnecting")
+
+    pv.force_connect()
+    assert pv.wait_for_connection(5.0)
+
+    called = {'called': False}
+
+    def callback(value=None, **kwargs):
+        called['called'] = True
+        print("update", value.sum())
+
+    pv.add_callback(callback)
+
+    time.sleep(1)
+    assert pv.get() is not None
+    assert called['called']
 
 
 if __name__ == '__main__':

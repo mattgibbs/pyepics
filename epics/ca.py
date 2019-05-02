@@ -15,17 +15,19 @@ documentation here is developer documentation.
 import ctypes
 import ctypes.util
 
+import atexit
+import collections
+import functools
 import os
 import sys
+import threading
 import time
-import logging
-from  math import log10
-import atexit
 import warnings
-from threading import Thread
+
+from math import log10
 from pkg_resources import resource_filename
 
-from .utils import (STR2BYTES, BYTES2STR, NULLCHAR, NULLCHAR_2,
+from .utils import (STR2BYTES, BYTES2STR, NULLCHAR_2,
                     strjoin, memcopy, is_string, is_string_or_bytes,
                     ascii_string, clib_search_path)
 
@@ -74,26 +76,26 @@ AUTOMONITOR_MAXLENGTH = 65536 # 16384
 DEFAULT_CONNECTION_TIMEOUT = 2.0
 
 ## Cache of existing channel IDs:
-#  pvname: {'chid':chid, 'conn': isConnected,
-#           'ts': ts_conn, 'callbacks': [ user_callback... ])
-#  isConnected   = True/False: if connected.
-#  ts_conn       = ts of last connection event or failed attempt.
-#  user_callback = one or more user functions to be called on
-#                  change (accumulated in the cache)
-_cache  = {}
-_namecache = {}
+# Keyed on context, then on pv name (e.g., _cache[ctx][pvname])
+_cache = collections.defaultdict(dict)
+
+# Puts with completion in progress:
+_put_completes = []
 
 # logging.basicConfig(filename='ca.log',level=logging.DEBUG)
-## Cache of pvs waiting for put to be done.
-_put_done =  {}
 
-# get a unique python value that cannot be a value held by an
-# actual PV to signal "Get is incomplete, awaiting callback"
-class Empty:
-    """used to create a unique python value that cannot be
-    held as an actual PV value"""
-    pass
-GET_PENDING = Empty()
+class _GetPending:
+    """
+    A unique python object that cannot be a value held by an actual PV to
+    signal "Get is incomplete, awaiting callback"
+    """
+    def __repr__(self):
+        return 'GET_PENDING'
+
+
+Empty = _GetPending  # back-compat
+GET_PENDING = _GetPending()
+
 
 class ChannelAccessException(Exception):
     """Channel Access Exception: General Errors"""
@@ -102,6 +104,14 @@ class ChannelAccessException(Exception):
         type_, value, traceback = sys.exc_info()
         if type_ is not None:
             sys.excepthook(type_, value, traceback)
+
+class ChannelAccessGetFailure(Exception):
+    """Channel Access Exception: _onGetEvent != ECA_NORMAL"""
+    def __init__(self, message, chid, status):
+        super(ChannelAccessGetFailure, self).__init__(message)
+        self.chid = chid
+        self.status = status
+
 
 class CASeverityException(Exception):
     """Channel Access Severity Check Exception:
@@ -112,6 +122,98 @@ class CASeverityException(Exception):
         self.msg = msg
     def __str__(self):
         return " %s returned '%s'" % (self.fcn, self.msg)
+
+
+class _CacheItem:
+    '''
+    The cache state for a single chid in a context.
+
+    This class itself is not thread-safe; it is expected that callers will use
+    the lock appropriately when modifying the state.
+
+    Attributes
+    ----------
+    lock : threading.RLock
+        A lock for modifying the state
+    conn : bool
+        The connection status
+    chid : ctypes.c_long
+        The channel ID
+    pvname : str
+        The PV name
+    ts : float
+        The connection timestamp (or last failed attempt)
+    failures : int
+        Number of failed connection attempts
+    get_results : dict
+        Keyed on the requested field type -> requested value
+    callbacks : list
+        One or more user functions to be called on change of connection status
+    access_event_callbacks : list
+        One or more user functions to be called on change of access rights
+    '''
+
+    def __init__(self, chid, pvname, callbacks=None, ts=0):
+        self.lock = threading.RLock()
+        self.conn = False
+        self.chid = chid
+        self.pvname = pvname
+        self.ts = ts
+        self.failures = 0
+
+        self.get_results = collections.defaultdict(lambda: [None])
+
+        if callbacks is None:
+            callbacks = []
+
+        self.callbacks = callbacks
+        self.access_event_callback = []
+
+    def __getitem__(self, key):
+        # back-compat
+        return getattr(self, key)
+
+    @property
+    def chid_int(self):
+        'The channel id, as an integer'
+        return _chid_to_int(self.chid)
+
+    def run_access_event_callbacks(self, ra, wa):
+        '''
+        Run all access event callbacks
+
+        Parameters
+        ----------
+        ra : bool
+            Read-access
+        wa : bool
+            Write-access
+        '''
+        for callback in list(self.access_event_callback):
+            if callable(callback):
+                callback(ra, wa)
+
+    def run_connection_callbacks(self, conn, timestamp):
+        '''
+        Run all connection callbacks
+
+        Parameters
+        ----------
+        conn : bool
+            Connected (True) or disconnected
+        timestamp : float
+            The event timestamp
+        '''
+        self.conn = conn
+        self.ts = timestamp
+        self.failures = 0
+
+        chid_int = self.chid_int
+        for callback in list(self.callbacks):
+            if callable(callback):
+                poll()
+                # print( ' ==> connection callback ', callback, conn)
+                callback(pvname=self.pvname, chid=chid_int, conn=self.conn)
 
 
 def _find_lib(inp_lib_name):
@@ -155,7 +257,7 @@ def _find_lib(inp_lib_name):
         plist = ['']
         try:
             plist = os.environ.get(envname, '').split(path_sep)
-        except AttributError:
+        except AttributeError:
             pass
         return plist
 
@@ -214,7 +316,7 @@ def initialize_libca():
     if 'EPICS_CA_MAX_ARRAY_BYTES' not in os.environ:
         os.environ['EPICS_CA_MAX_ARRAY_BYTES'] = "%i" %  2**24
 
-    global libca, initial_context, _cache
+    global libca, initial_context
 
     if os.name == 'nt':
         load_dll = ctypes.windll.LoadLibrary
@@ -278,7 +380,6 @@ def finalize_libca(maxtime=10.0):
 
     """
     global libca
-    global _cache
     if libca is None:
         return
     try:
@@ -287,10 +388,8 @@ def finalize_libca(maxtime=10.0):
         poll()
         for ctxid, ctx in _cache.items():
             for pvname, info in ctx.items():
-                try:
-                    clear_channel(info['chid'])
-                except KeyError:
-                    pass
+                if info.chid is not None:
+                    clear_channel(info.chid)
             ctx.clear()
         _cache.clear()
         flush_count = 0
@@ -305,22 +404,53 @@ def finalize_libca(maxtime=10.0):
         pass
     time.sleep(0.01)
 
+
 def get_cache(pvname):
     "return cache dictionary for a given pvname in the current context"
     return _cache[current_context()].get(pvname, None)
+
+
+def _get_or_create_cache_item_by_pvname(pvname, chid=None):
+    '''
+    Return the current _CacheItem for a given pvname, or create a new one
+    '''
+    context_cache = _cache[current_context()]
+    try:
+        return context_cache[pvname]
+    except KeyError:
+        context_cache[pvname] = _CacheItem(chid=_chid_to_int(chid),
+                                           pvname=pvname)
+        return context_cache[pvname]
+
+
+def _get_or_create_cache_item_by_chid(chid):
+    '''
+    Return the current _CacheItem for a given chid, or create a new one
+
+    Parameters
+    ----------
+    chid : ctypes.c_long
+        Channel ID
+
+    Returns
+    -------
+    item : _CacheItem
+        The _CacheItem for the chid
+    '''
+    return _get_or_create_cache_item_by_pvname(name(chid), chid=chid)
+
 
 def show_cache(print_out=True):
     """print out a listing of PVs in the current session to
     standard output.  Use the *print_out=False* option to be
     returned the listing instead of having it printed out.
     """
-    global _cache
     out = []
     out.append('#  PVName        ChannelID/Context Connected?')
     out.append('#--------------------------------------------')
     for context, context_chids in  list(_cache.items()):
         for vname, val in list(context_chids.items()):
-            chid = val['chid']
+            chid = val.chid
             if len(vname) < 15:
                 vname = (vname + ' '*15)[:15]
             out.append(" %s %s/%s  %s" % (vname, repr(chid),
@@ -341,9 +471,7 @@ def clear_cache():
     """
 
     # Clear global state variables
-    global _cache
     _cache.clear()
-    _put_done.clear()
 
     # Clear the cache of PVs used by epics.caget()-like functions
     from . import pv
@@ -375,15 +503,13 @@ def withCA(fcn):
     Note that CA functions that take a Channel ID (chid) as an
     argument are  NOT wrapped by this: to get a chid, the
     library must have been initialized already."""
+    @functools.wraps(fcn)
     def wrapper(*args, **kwds):
         "withCA wrapper"
         global libca
         if libca is None:
             initialize_libca()
         return fcn(*args, **kwds)
-    wrapper.__doc__ = fcn.__doc__
-    wrapper.__name__ = fcn.__name__
-    wrapper.__dict__.update(fcn.__dict__)
     return wrapper
 
 def withCHID(fcn):
@@ -395,6 +521,7 @@ def withCHID(fcn):
     # It may be worth making a chid class (which could hold connection
     # data of _cache) that could be tested here.  For now, that
     # seems slightly 'not low-level' for this module.
+    @functools.wraps(fcn)
     def wrapper(*args, **kwds):
         "withCHID wrapper"
         if len(args)>0:
@@ -408,10 +535,8 @@ def withCHID(fcn):
                 raise ChannelAccessException(msg)
 
         return fcn(*args, **kwds)
-    wrapper.__doc__ = fcn.__doc__
-    wrapper.__name__ = fcn.__name__
-    wrapper.__dict__.update(fcn.__dict__)
     return wrapper
+
 
 def withConnectedCHID(fcn):
     """decorator to ensure that the first argument of a function is a
@@ -419,6 +544,7 @@ def withConnectedCHID(fcn):
     robust, and will try to make sure a ``chid`` is actually connected
     before calling the decorated function.
     """
+    @functools.wraps(fcn)
     def wrapper(*args, **kwds):
         "withConnectedCHID wrapper"
         if len(args)>0:
@@ -431,28 +557,45 @@ def withConnectedCHID(fcn):
                                              (fcn.__name__))
             if not isConnected(chid):
                 timeout = kwds.get('timeout', DEFAULT_CONNECTION_TIMEOUT)
-                fmt ="%s() timed out waiting '%s' to connect (%d seconds)"
-                if not connect_channel(chid, timeout=timeout):
+                connected =  connect_channel(chid, timeout=timeout)
+                if not connected:
+                    fmt ="%s() timed out waiting '%s' to connect (%d seconds)"
                     raise ChannelAccessException(fmt % (fcn.__name__,
-                                                        name(chid), timeout))
+                                                name(chid), timeout))
 
         return fcn(*args, **kwds)
-    wrapper.__doc__ = fcn.__doc__
-    wrapper.__name__ = fcn.__name__
-    wrapper.__dict__.update(fcn.__dict__)
+    return wrapper
+
+def withMaybeConnectedCHID(fcn):
+    """decorator to **try** to ensure that the first argument of a function
+    is a connected Channel ID, ``chid``.
+    """
+    @functools.wraps(fcn)
+    def wrapper(*args, **kwds):
+        "withMaybeConnectedCHID wrapper"
+        if len(args)>0:
+            chid = args[0]
+            args = list(args)
+            if isinstance(chid, int):
+                args[0] = chid = dbr.chid_t(chid)
+            if not isinstance(chid, dbr.chid_t):
+                raise ChannelAccessException("%s: not a valid chid!" % \
+                                             (fcn.__name__))
+            if not isConnected(chid):
+                timeout = kwds.get('timeout', DEFAULT_CONNECTION_TIMEOUT)
+                connect_channel(chid, timeout=timeout)
+        return fcn(*args, **kwds)
     return wrapper
 
 def withInitialContext(fcn):
     """decorator to ensure that the wrapped function uses the
     initial threading context created at initialization of CA
     """
+    @functools.wraps(fcn)
     def wrapper(*args, **kwds):
         "withInitialContext wrapper"
         use_initial_context()
         return fcn(*args, **kwds)
-    wrapper.__doc__ = fcn.__doc__
-    wrapper.__name__ = fcn.__name__
-    wrapper.__dict__.update(fcn.__dict__)
     return wrapper
 
 def PySEVCHK(func_name, status, expected=dbr.ECA_NORMAL):
@@ -474,13 +617,11 @@ def withSEVCHK(fcn):
     function whose return value is from a corresponding libca function
     and whose return value should be ``dbr.ECA_NORMAL``.
     """
+    @functools.wraps(fcn)
     def wrapper(*args, **kwds):
         "withSEVCHK wrapper"
         status = fcn(*args, **kwds)
         return PySEVCHK( fcn.__name__, status)
-    wrapper.__doc__ = fcn.__doc__
-    wrapper.__name__ = fcn.__name__
-    wrapper.__dict__.update(fcn.__dict__)
     return wrapper
 
 ##
@@ -493,10 +634,6 @@ def _onMonitorEvent(args):
     # callback to get informed of connection loss, so we just ignore any
     # bad status codes.
 
-    # for 64-bit python on Windows!
-    if dbr.PY64_WINDOWS:
-        args = args.contents
-
     if args.status != dbr.ECA_NORMAL:
         return
 
@@ -508,152 +645,66 @@ def _onMonitorEvent(args):
     # add kwds arguments for CTRL and TIME variants
     # this is in a try/except clause to avoid problems
     # caused by uninitialized waveform arrays
-    if args.type >= dbr.CTRL_STRING:
-        try:
-            tmpv = value[0]
-            for attr in dbr.ctrl_limits + ('precision', 'units', 'status', 'severity'):
-                if hasattr(tmpv, attr):
-                    kwds[attr] = getattr(tmpv, attr)
-                    if attr == 'units':
-                        kwds[attr] = BYTES2STR(getattr(tmpv, attr, None))
-
-            if (hasattr(tmpv, 'strs') and hasattr(tmpv, 'no_str') and
-                tmpv.no_str > 0):
-                kwds['enum_strs'] = tuple([tmpv.strs[i].value for
-                                           i in range(tmpv.no_str)])
-        except IndexError:
-            pass
-    elif args.type >= dbr.TIME_STRING:
-        try:
-            tmpv = value[0]
-            kwds['status']    = tmpv.status
-            kwds['severity']  = tmpv.severity
-            kwds['timestamp'] = dbr.make_unixtime(tmpv.stamp)
-            kwds['posixseconds'] = tmpv.stamp.secs + dbr.EPICS2UNIX_EPOCH
-            kwds['nanoseconds'] = tmpv.stamp.nsec
-        except IndexError:
-            pass
+    try:
+        kwds.update(**_unpack_metadata(ftype=args.type, dbr_value=value[0]))
+    except IndexError:
+        pass
 
     value = _unpack(args.chid, value, count=args.count, ftype=args.type)
-    if hasattr(args.usr, '__call__'):
+    if callable(args.usr):
         args.usr(value=value, **kwds)
 
 ## connection event handler:
 def _onConnectionEvent(args):
-    """set flag in cache holding whteher channel is
-    connected. if provided, run a user-function"""
-    # for 64-bit python on Windows!
-    if dbr.PY64_WINDOWS:
-        args = args.contents
+    "Connection notification - run user callbacks"
+    entry = _get_or_create_cache_item_by_chid(args.chid)
+    entry.run_connection_callbacks(conn=(args.op == dbr.OP_CONN_UP),
+                                   timestamp=time.time())
 
-    ctx = current_context()
-    conn = (args.op == dbr.OP_CONN_UP)
-    global _cache
-
-    if ctx is None and len(_cache.keys()) > 0:
-        ctx = list(_cache.keys())[0]
-    if ctx not in _cache:
-        _cache[ctx] = {}
-
-    # search for PV in any context...
-    pv_found = False
-    for context in _cache:
-        pvname = name(args.chid)
-
-        if pvname in _cache[context]:
-            pv_found = True
-            break
-
-    # logging.debug("ConnectionEvent %s/%i/%i " % (pvname, args.chid, conn))
-    # print("ConnectionEvent %s/%i/%i " % (pvname, args.chid, conn))
-    if not pv_found:
-        _cache[ctx][pvname] = {'conn':False, 'chid': args.chid,
-                               'ts':0, 'failures':0, 'value': None,
-                               'callbacks': []}
-
-    # set connection time, run connection callbacks
-    # in all contexts
-    for context, cvals in _cache.items():
-        if pvname in cvals:
-            entry = cvals[pvname]
-            ichid = entry['chid']
-            if isinstance(entry['chid'], dbr.chid_t):
-                ichid = entry['chid'].value
-
-            if int(ichid) == int(args.chid):
-                chid = args.chid
-                entry.update({'chid': chid, 'conn': conn,
-                              'ts': time.time(), 'failures': 0})
-                for callback in entry.get('callbacks', []):
-                    poll()
-                    if hasattr(callback, '__call__'):
-                        # print( ' ==> connection callback ', callback, conn)
-                        callback(pvname=pvname, chid=chid, conn=conn)
-    #print('Connection done')
-
-    return
 
 ## get event handler:
 def _onGetEvent(args, **kws):
     """get_callback event: simply store data contents which
     will need conversion to python data with _unpack()."""
-    # for 64-bit python on Windows!
-    if dbr.PY64_WINDOWS:
-        args = args.contents
-
     # print("GET EVENT: chid, user ", args.chid, args.usr)
     # print("GET EVENT: type, count ", args.type, args.count)
     # print("GET EVENT: status ",  args.status, dbr.ECA_NORMAL)
-    global _cache
-    if args.status != dbr.ECA_NORMAL:
+    entry = get_cache(name(args.chid))
+    if not entry:
         return
 
-    if dbr.IRON_PYTHON:
-        get_cache(name(args.chid))[args.usr.value] = (dbr.cast_args(args))
+    ftype = (args.usr.value if dbr.IRON_PYTHON
+             else args.usr)
+
+    if args.status != dbr.ECA_NORMAL:
+        result = ChannelAccessGetFailure(
+            'Get failed; status code: %d' % args.status,
+            chid=args.chid,
+            status=args.status
+        )
+    elif dbr.IRON_PYTHON:
+        result = dbr.cast_args(args)
     else:
-        get_cache(name(args.chid))[args.usr] = memcopy(dbr.cast_args(args))
+        result = memcopy(dbr.cast_args(args))
+
+    with entry.lock:
+        entry.get_results[ftype][0] = result
 
 
 ## put event handler:
 def _onPutEvent(args, **kwds):
-    """set put-has-completed for this channel,
-    call optional user-supplied callback"""
-    # for 64-bit python on Windows!
-    if dbr.PY64_WINDOWS:
-        args = args.contents
-
-    pvname = name(args.chid)
-    fcn  = _put_done[pvname][1]
-    data = _put_done[pvname][2]
-    _put_done[pvname] = (True, None, None)
-    if hasattr(fcn, '__call__'):
-        if isinstance(data, dict):
-            kwds.update(data)
-        elif data is not None:
-            kwds['data'] = data
-        fcn(pvname=pvname, **kwds)
+    'Put completion notification - run specified callback'
+    fcn = args.usr
+    if callable(fcn):
+        fcn()
 
 
 def _onAccessRightsEvent(args):
-    # for 64-bit python on Windows!
-    global _cache
-    if dbr.PY64_WINDOWS:
-        args = args.contents
+    'Access rights callback'
+    entry = _get_or_create_cache_item_by_chid(args.chid)
+    entry.run_access_event_callbacks(
+        bool(args.read_access), bool(args.write_access))
 
-    chid = args.chid
-    ra = bool(args.read_access)
-    wa = bool(args.write_access)
-
-    # Getting bunk result from ca.current_context on channel disconnect
-    # Do this the long way...
-    for ctx in _cache.values():
-        pvname = name(chid)
-        if pvname in ctx:
-            ch = ctx[pvname]
-            if 'access_event_callback' in ch:
-                for callback in ch['access_event_callback']:
-                    if callable(callback):
-                        callback(ra, wa)
 
 # create global reference to these callbacks
 _CB_CONNECT = dbr.make_callback(_onConnectionEvent, dbr.connection_args)
@@ -674,11 +725,7 @@ def context_create(ctx=None):
     "create a context. if argument is None, use PREEMPTIVE_CALLBACK"
     if ctx is None:
         ctx = {False:0, True:1}[PREEMPTIVE_CALLBACK]
-    ret = libca.ca_context_create(ctx)
-    new_ctx = current_context()
-    if new_ctx and new_ctx not in _cache:
-        _cache[new_ctx] = {}
-    return ret
+    return libca.ca_context_create(ctx)
 
 
 def create_context(ctx=None):
@@ -703,12 +750,11 @@ def create_context(ctx=None):
 @withCA
 def context_destroy():
     "destroy current context"
-    global _cache
     ctx = current_context()
     ret = libca.ca_context_destroy()
-    if ctx in _cache:
-        _cache[ctx].clear()
-        _cache.pop(ctx)
+    ctx_cache = _cache.pop(ctx, None)
+    if ctx_cache is not None:
+        ctx_cache.clear()
     return ret
 
 def destroy_context():
@@ -871,41 +917,25 @@ def create_channel(pvname, connect=False, auto_cb=True, callback=None):
     # a reference to _onConnectionEvent:  This is really the connection
     # callback that is run -- the callack here is stored in the _cache
     # and called by _onConnectionEvent.
-    pvn = STR2BYTES(pvname)
-    ctx = current_context()
-    global _cache
-    if ctx not in _cache:
-        _cache[ctx] = {}
-    if pvname not in _cache[ctx]: # new PV for this context
-        entry = {'conn':False,  'chid': None,
-                 'ts': 0,  'failures':0, 'value': None,
-                 'callbacks': [ callback ]}
-        # logging.debug("Create Channel %s " % pvname)
-        _cache[ctx][pvname] = entry
-    else:
-        entry = _cache[ctx][pvname]
-        if not entry['conn'] and callback is not None: # pending connection
-            _cache[ctx][pvname]['callbacks'].append(callback)
-        elif (hasattr(callback, '__call__') and
-              not callback in entry['callbacks']):
-            entry['callbacks'].append(callback)
-            callback(chid=entry['chid'], pvname=pvname, conn=entry['conn'])
-    conncb = 0
-    if auto_cb:
-        conncb = _CB_CONNECT
-    if entry.get('chid', None) is not None:
-        # already have or waiting on a chid
-        chid = _cache[ctx][pvname]['chid']
-    else:
-        chid = dbr.chid_t()
-        ret = libca.ca_create_channel(ctypes.c_char_p(pvn), conncb, 0, 0,
-                                      ctypes.byref(chid))
-        PySEVCHK('create_channel', ret)
-        entry['chid'] = chid
-    chid_key = chid
-    if isinstance(chid_key, dbr.chid_t):
-        chid_key = chid.value
-    _namecache[chid_key] = BYTES2STR(pvn)
+    entry = _get_or_create_cache_item_by_pvname(pvname=pvname, chid=None)
+    if callable(callback) and callback not in entry.callbacks:
+        entry.callbacks.append(callback)
+        if entry.chid is not None and entry.conn:
+            callback(chid=_chid_to_int(entry.chid), pvname=pvname,
+                     conn=entry.conn)
+
+    with entry.lock:
+        chid = entry.chid
+        if chid is None:
+            conncb = (_CB_CONNECT if auto_cb
+                      else 0)
+
+            chid = dbr.chid_t()
+            entry.chid = chid
+            ret = libca.ca_create_channel(ctypes.c_char_p(STR2BYTES(pvname)),
+                                          conncb, 0, 0, ctypes.byref(chid))
+            PySEVCHK('create_channel', ret)
+
     if connect:
         connect_channel(chid)
     return chid
@@ -956,10 +986,6 @@ def connect_channel(chid, timeout=None, verbose=False):
         start_time = time.time()
         ctx = current_context()
         pvname = name(chid)
-        global _cache
-        if ctx not in _cache:
-            _cache[ctx] = {}
-
         if timeout is None:
             timeout = DEFAULT_CONNECTION_TIMEOUT
 
@@ -967,38 +993,44 @@ def connect_channel(chid, timeout=None, verbose=False):
             poll()
             conn = (state(chid) == dbr.CS_CONN)
         if not conn:
-            _cache[ctx][pvname]['ts'] = time.time()
-            _cache[ctx][pvname]['failures'] += 1
+            entry = _cache[ctx][pvname]
+            with entry.lock:
+                entry.ts = time.time()
+                entry.failures += 1
     return conn
 
 # functions with very light wrappings:
 @withCHID
 def replace_access_rights_event(chid, callback=None):
-    global _cache
+    ch = get_cache(name(chid))
 
-    ctx = current_context()
-    ch = _cache[ctx][name(chid)]
-    if 'access_event_callback' not in ch:
-        ch.update({'access_event_callback': list()})
-
-    if callback is not None:
-        ch['access_event_callback'].append(callback)
+    if ch and callback is not None:
+        ch.access_event_callback.append(callback)
 
     ret = libca.ca_replace_access_rights_event(chid, _CB_ACCESS)
     PySEVCHK('replace_access_rights_event', ret)
 
+def _chid_to_int(chid):
+    '''
+    Return the integer representation of a chid
+
+    Parameters
+    ----------
+    chid : ctypes.c_long, int
+
+    Returns
+    -------
+    chid : int
+    '''
+    if hasattr(chid, 'value'):
+        return int(chid.value)
+    return chid
+
+
 @withCHID
 def name(chid):
     "return PV name for channel name"
-    global _namecache
-    # sys.stdout.write("NAME %s %s\n" % (repr(chid), repr(chid.value in _namecache)))
-    # sys.stdout.flush()
-
-    if chid.value in _namecache:
-        val = _namecache[chid.value]
-    else:
-        val = _namecache[chid.value] = BYTES2STR(libca.ca_name(chid))
-    return val
+    return BYTES2STR(libca.ca_name(chid))
 
 @withCHID
 def host_name(chid):
@@ -1073,7 +1105,7 @@ def promote_fieldtype(ftype, use_time=False, use_ctrl=False):
 
 def _unpack(chid, data, count=None, ftype=None, as_numpy=True):
     """unpacks raw data for a Channel ID `chid` returned by libca functions
-    including `ca_get_array_callback` or subscription callback, and returns
+    including `ca_array_get_callback` or subscription callback, and returns
     the corresponding Python data
 
     Normally, users are not expected to need to access this function, but
@@ -1091,8 +1123,6 @@ def _unpack(chid, data, count=None, ftype=None, as_numpy=True):
         data type of channel (defaults to native type of chid)
     as_numpy : bool
         whether to convert to numpy array.
-
-
     """
 
     def scan_string(data, count):
@@ -1136,9 +1166,11 @@ def _unpack(chid, data, count=None, ftype=None, as_numpy=True):
 
     # Grab the native-data-type data
     try:
-        data = data[1]
+        extended_data, data = data
     except (TypeError, IndexError):
         return None
+    except ValueError:
+        extended_data = None
 
     if count == 0 or count is None:
         count = len(data)
@@ -1149,12 +1181,133 @@ def _unpack(chid, data, count=None, ftype=None, as_numpy=True):
         ftype = field_type(chid)
     if ftype is None:
         ftype = dbr.INT
+
     ntype = native_type(ftype)
     elem_count = element_count(chid)
     use_numpy = (HAS_NUMPY and as_numpy and ntype != dbr.STRING and count != 1)
     return unpack(data, count, ntype, use_numpy, elem_count)
 
-@withConnectedCHID
+
+def _unpack_metadata(ftype, dbr_value):
+    '''Unpack DBR metadata into a dictionary
+
+    Parameters
+    ----------
+    ftype : int
+        The field type for the respective DBR value
+    dbr_value : ctype.Structure
+        The structure holding the data to be unpacked
+
+    Returns
+    -------
+    md : dict
+        A dictionary containing zero or more of the following keys, depending
+        on ftype::
+
+           {'precision', 'units', 'status', 'severity', 'enum_strs', 'status',
+           'severity', 'timestamp', 'posixseconds', 'nanoseconds',
+           'upper_disp_limit', 'lower_disp_limit', 'upper_alarm_limit',
+           'upper_warning_limit', 'lower_warning_limit','lower_alarm_limit',
+           'upper_ctrl_limit', 'lower_ctrl_limit'}
+    '''
+    md = {}
+    if ftype >= dbr.CTRL_STRING:
+        for attr in dbr.ctrl_limits + ('precision', 'units', 'status',
+                                       'severity'):
+            if hasattr(dbr_value, attr):
+                md[attr] = getattr(dbr_value, attr)
+                if attr == 'units':
+                    md[attr] = BYTES2STR(getattr(dbr_value, attr, None))
+
+        if hasattr(dbr_value, 'strs') and getattr(dbr_value, 'no_str', 0) > 0:
+            md['enum_strs'] = tuple(BYTES2STR(dbr_value.strs[i].value)
+                                    for i in range(dbr_value.no_str))
+    elif ftype >= dbr.TIME_STRING:
+        md['status'] = dbr_value.status
+        md['severity'] = dbr_value.severity
+        md['timestamp'] = dbr.make_unixtime(dbr_value.stamp)
+        md['posixseconds'] = dbr_value.stamp.secs + dbr.EPICS2UNIX_EPOCH
+        md['nanoseconds'] = dbr_value.stamp.nsec
+
+    return md
+
+
+@withMaybeConnectedCHID
+def get_with_metadata(chid, ftype=None, count=None, wait=True, timeout=None,
+                      as_string=False, as_numpy=True):
+    """Return the current value along with metadata for a Channel
+
+    Parameters
+    ----------
+    chid :  ctypes.c_long
+       Channel ID
+    ftype : int
+       field type to use (native type is default)
+    count : int
+       maximum element count to return (full data returned by default)
+    as_string : bool
+       whether to return the string representation of the value.  See notes.
+    as_numpy : bool
+       whether to return the Numerical Python representation for array /
+       waveform data.
+    wait : bool
+        whether to wait for the data to be received, or return immediately.
+    timeout : float
+        maximum time to wait for data before returning ``None``.
+
+    Returns
+    -------
+    data : dict or None
+       The dictionary of data, guaranteed to at least have the 'value' key.
+       Depending on ftype, other keys may also be present::
+
+           {'precision', 'units', 'status', 'severity', 'enum_strs', 'status',
+           'severity', 'timestamp', 'posixseconds', 'nanoseconds',
+           'upper_disp_limit', 'lower_disp_limit', 'upper_alarm_limit',
+           'upper_warning_limit', 'lower_warning_limit','lower_alarm_limit',
+           'upper_ctrl_limit', 'lower_ctrl_limit'}
+
+       Returns ``None`` if the channel is not connected, `wait=False` was used,
+       or the data transfer timed out.
+
+    See also
+    --------
+    See :func:`get` for additional usage notes.
+    """
+    if ftype is None:
+        ftype = field_type(chid)
+    if ftype in (None, -1):
+        return None
+    if count is None:
+        count = 0
+        # count = element_count(chid)
+        # don't default to the element_count here - let EPICS tell us the size
+        # in the _onGetEvent callback
+    else:
+        count = min(count, element_count(chid))
+
+    entry = get_cache(name(chid))
+    if not entry:
+        return
+
+    # implementation note: cached value of
+    #   None        implies no value, no expected callback
+    #   GET_PENDING implies no value yet, callback expected.
+    with entry.lock:
+        last_get, = entry.get_results[ftype]
+        if last_get is not GET_PENDING:
+            entry.get_results[ftype] = [GET_PENDING]
+            ret = libca.ca_array_get_callback(
+                ftype, count, chid, _CB_GET, ctypes.py_object(ftype))
+            PySEVCHK('get', ret)
+
+    if wait:
+        return get_complete_with_metadata(chid, count=count, ftype=ftype,
+                                          timeout=timeout, as_string=as_string,
+                                          as_numpy=as_numpy)
+
+
+@withMaybeConnectedCHID
 def get(chid, ftype=None, count=None, wait=True, timeout=None,
         as_string=False, as_numpy=True):
     """return the current value for a Channel.
@@ -1216,38 +1369,104 @@ def get(chid, ftype=None, count=None, wait=True, timeout=None,
     later with :func:`get_complete`.
 
     """
-    global _cache
+    info = get_with_metadata(chid, ftype=ftype, count=count, wait=wait,
+                             timeout=timeout, as_string=as_string,
+                             as_numpy=as_numpy)
+    return (info['value'] if info is not None else None)
 
+
+@withMaybeConnectedCHID
+def get_complete_with_metadata(chid, ftype=None, count=None, timeout=None,
+                               as_string=False, as_numpy=True):
+    """Returns the current value and associated metadata for a Channel
+
+    This completes an earlier incomplete :func:`get` that returned ``None``,
+    either because `wait=False` was used or because the data transfer did not
+    complete before the timeout passed.
+
+    Parameters
+    ----------
+    chid : ctypes.c_long
+        Channel ID
+    ftype :  int
+        field type to use (native type is default)
+    count : int
+        maximum element count to return (full data returned by default)
+    as_string : bool
+        whether to return the string representation of the value.
+    as_numpy :  bool
+        whether to return the Numerical Python representation
+        for array / waveform data.
+    timeout : float
+        maximum time to wait for data before returning ``None``.
+
+    Returns
+    -------
+    data : dict or None
+       This function will return ``None`` if the previous :func:`get` actually
+       completed, or if this data transfer also times out.
+
+    See also
+    --------
+    See :func:`get_complete` for additional usage notes.
+    """
     if ftype is None:
         ftype = field_type(chid)
-    if ftype in (None, -1):
-        return None
     if count is None:
-        count = 0
-        # count = element_count(chid)
-        # don't default to the element_count here - let EPICS tell us the size
-        # in the _onGetEvent callback
+        count = element_count(chid)
     else:
         count = min(count, element_count(chid))
 
-    ncache = _cache[current_context()][name(chid)]
-    # implementation note: cached value of
-    #   None        implies no value, no expected callback
-    #   GET_PENDING implies no value yet, callback expected.
-    if ncache.get('value', None) is None:
-        ncache['value'] = GET_PENDING
-        ret = libca.ca_array_get_callback(ftype, count, chid, _CB_GET,
-                                          ctypes.py_object('value'))
-        PySEVCHK('get', ret)
+    entry = get_cache(name(chid))
+    if not entry:
+        return
 
-    if wait:
-        return get_complete(chid, count=count, ftype=ftype,
-                            timeout=timeout,
-                            as_string=as_string, as_numpy=as_numpy)
+    get_result = entry.get_results[ftype]
 
-@withConnectedCHID
-def get_complete(chid, ftype=None, count=None, timeout=None,
-                 as_string=False,  as_numpy=True):
+    if get_result[0] is None:
+        warnings.warn('get_complete without initial get() call')
+        return None
+
+    t0 = time.time()
+    if timeout is None:
+        timeout = 1.0 + log10(max(1, count))
+
+    while get_result[0] is GET_PENDING:
+        poll()
+
+        if time.time()-t0 > timeout:
+            msg = "ca.get('%s') timed out after %.2f seconds."
+            warnings.warn(msg % (name(chid), timeout))
+            return None
+
+    full_value, = get_result
+
+    # print("Get Complete> Unpack ", ncache['value'], count, ftype)
+
+    if isinstance(full_value, Exception):
+        get_failure_reason = full_value
+        raise get_failure_reason
+
+    # NOTE: unpacking happens for each requester; this could potentially be put
+    # in the get callback itself. (different downside there...)
+    extended_data, _ = full_value
+    metadata = _unpack_metadata(ftype=ftype, dbr_value=extended_data)
+    val = _unpack(chid, full_value, count=count,
+                  ftype=ftype, as_numpy=as_numpy)
+    # print("Get Complete unpacked to ", val)
+
+    if as_string:
+        val = _as_string(val, chid, count, ftype)
+    elif isinstance(val, ctypes.Array) and HAS_NUMPY and as_numpy:
+        val = numpy.ctypeslib.as_array(memcopy(val))
+
+    # value retrieved, clear cached value
+    metadata['value'] = val
+    return metadata
+
+@withMaybeConnectedCHID
+def get_complete(chid, ftype=None, count=None, timeout=None, as_string=False,
+                 as_numpy=True):
     """returns the current value for a Channel, completing an
     earlier incomplete :func:`get` that returned ``None``, either
     because `wait=False` was used or because the data transfer
@@ -1284,42 +1503,12 @@ def get_complete(chid, ftype=None, count=None, timeout=None,
     2. Consult the doc for :func:`get` for more information.
 
     """
-    global _cache
+    info = get_complete_with_metadata(chid, ftype=ftype, count=count,
+                                      timeout=timeout, as_string=as_string,
+                                      as_numpy=as_numpy)
+    return (info['value'] if info is not None
+            else None)
 
-    if ftype is None:
-        ftype = field_type(chid)
-    if count is None:
-        count = element_count(chid)
-    else:
-        count = min(count, element_count(chid))
-
-    ncache = _cache[current_context()][name(chid)]
-    if ncache['value'] is None:
-        return None
-
-    t0 = time.time()
-    if timeout is None:
-        timeout = 1.0 + log10(max(1, count))
-    while ncache['value'] is GET_PENDING:
-        poll()
-        if time.time()-t0 > timeout:
-            msg = "ca.get('%s') timed out after %.2f seconds."
-            warnings.warn(msg % (name(chid), timeout))
-            return None
-    #print("Get Complete> Unpack ", ncache['value'], count, ftype)
-
-    val = _unpack(chid, ncache['value'], count=count,
-                  ftype=ftype, as_numpy=as_numpy)
-    # print("Get Complete unpacked to ", val)
-
-    if as_string:
-        val = _as_string(val, chid, count, ftype)
-    elif isinstance(val, ctypes.Array) and HAS_NUMPY and as_numpy:
-        val = numpy.ctypeslib.as_array(memcopy(val))
-
-    # value retrieved, clear cached value
-    ncache['value'] = None
-    return val
 
 def _as_string(val, chid, count, ftype):
     "primitive conversion of value to a string"
@@ -1439,29 +1628,47 @@ def put(chid, value, wait=False, timeout=30, callback=None,
             raise ChannelAccessException(errmsg % (repr(value)))
 
     # simple put, without wait or callback
-    if not (wait or hasattr(callback, '__call__')):
+    if not (wait or callable(callback)):
         ret = libca.ca_array_put(ftype, count, chid, data)
         PySEVCHK('put', ret)
         poll()
         return ret
+
     # wait with callback (or put_complete)
     pvname = name(chid)
-    _put_done[pvname] = (False, callback, callback_data)
     start_time = time.time()
+    completed = dict(status=False)
 
-    ret = libca.ca_array_put_callback(ftype, count, chid,
-                                      data, _CB_PUTWAIT, 0)
+    def put_completed():
+        completed['status'] = True
+        _put_completes.remove(put_completed)
+        if not callable(callback):
+            return
+
+        if isinstance(callback_data, dict):
+            kwargs = callback_data
+        else:
+            kwargs = dict(data=callback_data)
+
+        callback(pvname=pvname, **kwargs)
+
+    _put_completes.append(put_completed)
+
+    ret = libca.ca_array_put_callback(ftype, count, chid, data, _CB_PUTWAIT,
+                                      ctypes.py_object(put_completed))
+
     PySEVCHK('put', ret)
     poll(evt=1.e-4, iot=0.05)
     if wait:
-        while not (_put_done[pvname][0] or
+        while not (completed['status'] or
                    (time.time()-start_time) > timeout):
             poll()
-        if not _put_done[pvname][0]:
+        if not completed['status']:
             ret = -ret
     return ret
 
-@withConnectedCHID
+
+@withMaybeConnectedCHID
 def get_ctrlvars(chid, timeout=5.0, warn=True):
     """return the CTRL fields for a Channel.
 
@@ -1476,91 +1683,28 @@ def get_ctrlvars(chid, timeout=5.0, warn=True):
     enum_strs will be a list of strings for the names of ENUM states.
 
     """
-    global _cache
-
     ftype = promote_type(chid, use_ctrl=True)
-    ncache = _cache[current_context()][name(chid)]
-    if ncache.get('ctrl_value', None) is None:
-        ncache['ctrl_value'] = GET_PENDING
-        ret = libca.ca_array_get_callback(ftype, 1, chid, _CB_GET,
-                                          ctypes.py_object('ctrl_value'))
+    metadata = get_with_metadata(chid, ftype=ftype, count=1, timeout=timeout,
+                                 wait=True)
+    if metadata is not None:
+        # Ignore the value returned:
+        metadata.pop('value', None)
+    return metadata
 
-        PySEVCHK('get_ctrlvars', ret)
 
-    if ncache.get('ctrl_value', None) is None:
-        return {}
-
-    t0 = time.time()
-    while ncache['ctrl_value'] is GET_PENDING:
-        poll()
-        if time.time()-t0 > timeout:
-            if warn:
-                msg = "ca.get_ctrlvars('%s') timed out after %.2f seconds."
-                warnings.warn(msg % (name(chid), timeout))
-            return {}
-    try:
-        tmpv = ncache['ctrl_value'][0]
-    except TypeError:
-        return {}
-
-    out = {}
-    for attr in ('precision', 'units', 'severity', 'status',
-                 'upper_disp_limit', 'lower_disp_limit',
-                 'upper_alarm_limit', 'upper_warning_limit',
-                 'lower_warning_limit','lower_alarm_limit',
-                 'upper_ctrl_limit', 'lower_ctrl_limit'):
-        if hasattr(tmpv, attr):
-            out[attr] = getattr(tmpv, attr, None)
-            if attr == 'units':
-                out[attr] = BYTES2STR(getattr(tmpv, attr, None))
-
-    if (hasattr(tmpv, 'strs') and hasattr(tmpv, 'no_str') and
-        tmpv.no_str > 0):
-        out['enum_strs'] = tuple([BYTES2STR(tmpv.strs[i].value)
-                                  for i in range(tmpv.no_str)])
-    ncache['ctrl_value'] = None
-    return out
-
-@withConnectedCHID
+@withCHID
 def get_timevars(chid, timeout=5.0, warn=True):
     """returns a dictionary of TIME fields for a Channel.
     This will contain keys of  *status*, *severity*, and *timestamp*.
     """
-    global _cache
-
     ftype = promote_type(chid, use_time=True)
-    ncache = _cache[current_context()][name(chid)]
-    if ncache.get('time_value', None) is None:
-        ncache['time_value'] = GET_PENDING
-        ret = libca.ca_array_get_callback(ftype, 1, chid, _CB_GET,
-                                          ctypes.py_object('time_value'))
+    metadata = get_with_metadata(chid, ftype=ftype, count=1, timeout=timeout,
+                                 wait=True)
+    if metadata is not None:
+        # Ignore the value returned:
+        metadata.pop('value', None)
+    return metadata
 
-        PySEVCHK('get_timevars', ret)
-
-    out = {}
-    if ncache.get('time_value', None) is None:
-        return out
-
-    t0 = time.time()
-    while ncache['time_value'] is GET_PENDING:
-        poll()
-        if time.time()-t0 > timeout:
-            if warn:
-                msg = "ca.get_timevars('%s') timed out after %.2f seconds."
-                warnings.warn(msg % (name(chid), timeout))
-            return {}
-
-    tmpv = ncache['time_value'][0]
-    for attr in ('status', 'severity'):
-        if hasattr(tmpv, attr):
-            out[attr] = getattr(tmpv, attr)
-    if hasattr(tmpv, 'stamp'):
-        out['timestamp'] = dbr.make_unixtime(tmpv.stamp)
-        out['posixseconds'] = tmpv.stamp.secs + dbr.EPICS2UNIX_EPOCH
-        out['nanoseconds'] = tmpv.stamp.nsec
-
-    ncache['time_value'] = None
-    return out
 
 def get_timestamp(chid):
     """return the timestamp of a Channel -- the time of last update."""
@@ -1794,11 +1938,11 @@ def sg_put(gid, chid, value):
     # poll()
     return ret
 
-class CAThread(Thread):
+class CAThread(threading.Thread):
     """
     Sub-class of threading.Thread to ensure that the
     initial CA context is used.
     """
     def run(self):
         use_initial_context()
-        Thread.run(self)
+        threading.Thread.run(self)
