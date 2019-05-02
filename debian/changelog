@@ -1,4 +1,4 @@
-pyepics (3.4.0-1) UNRELEASED; urgency=low
+pyepics (3.4.0-1) unstable; urgency=low
 
   [ Daron Chabot ]
   * BLD: do not run test suite
@@ -91,8 +91,9 @@ pyepics (3.4.0-1) UNRELEASED; urgency=low
   * BLD: tweak patch
   * BLD: standards, compat version bumps
   * BLD: lintian appeasement
+  * BLD: lintian error
 
- -- Daron Chabot <chabot@frib.msu.edu>  Thu, 02 May 2019 12:24:41 -0400
+ -- Daron Chabot <chabot@frib.msu.edu>  Thu, 02 May 2019 12:37:12 -0400
 
 pyepics (3.3.3-1) unstable; urgency=low
 
