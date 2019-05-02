@@ -1,1 +1,2 @@
 python-pyepics: unusual-interpreter
+python3-pyepics: unusual-interpreter
