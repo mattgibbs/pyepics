@@ -1,3 +1,16 @@
+pyepics (3.4.0-2) unstable; urgency=low
+
+  [ K Lauer ]
+  * FIX: have get_pv respect callbacks
+  * MNT: include all arguments in get_pv to remove need for **kwargs
+  * FIX: start auto-monitoring on already existing PV
+  * REF: allow customization/subclassing of PV with get_pv
+  * MNT: only update the cache with get_pv, not in PV.__init__
+  * API: deprecate get_pv context kwarg
+  * CLN: remove unnecessary definition
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Wed, 15 May 2019 11:57:22 -0400
+
 pyepics (3.4.0-1) unstable; urgency=low
 
   [ Daron Chabot ]
