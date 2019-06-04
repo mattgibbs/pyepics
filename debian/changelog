@@ -1,3 +1,47 @@
+pyepics (3.4.0-3) unstable; urgency=low
+
+  [ K Lauer ]
+  * MNT: add repr for _CacheItem
+  * FIX: clear_channel removes CacheItem
+  * FIX: chid -> info.chid
+
+  [ Matt Newville ]
+  * device.py needd use `timeout` for `get_pv()`
+
+  [ K Lauer ]
+  * TST/FIX: use get_pv instead of directly instantiating PV
+  * TST/FIX: more epics.PV -> epics.get_pv tweaks
+  * REF: redo chid caching
+  * TST: two cases where get_pv cannot be used in tests
+  * MNT: clear channel, then remove from cache
+  * TST: clear access callbacks so assertions at exit do not show
+  * MNT: remove unused context cache
+  * MNT: use catch-all exception during teardown
+  * MNT: remove refactored out code
+  * FIX: chid can be None
+  * MNT: remove more unnecessary code post-refactor
+  * REF: remove get_or_create* altogether
+  * TST: ensure auto_monitor is set as required
+  * FIX: grab pvname prior to clearing
+  * MNT: remove double repr
+  * REF: use the chid cache for all callbacks
+  * MNT: unnecessary check against None
+  * TST: add disconnection callback test
+  * TST/FIX: python 2.7 subprocess kill cannot be called twice
+  * DOC: add context to cacheitem docstring
+  * MNT: use the context from the cache entry, not current context
+  * ENH: add _get_cache_by_chid
+  * MNT: use _get_cache_by_chid
+  * FIX: further guard against multithreaded access of create_channel
+
+  [ Matt Newville ]
+  * remove cruft
+
+  [ Matthew Newville ]
+  * add initial PR templae
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Tue, 04 Jun 2019 16:21:19 -0400
+
 pyepics (3.4.0-2) unstable; urgency=low
 
   [ K Lauer ]
