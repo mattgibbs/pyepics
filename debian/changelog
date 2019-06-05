@@ -1,3 +1,12 @@
+pyepics (3.4.0-4) unstable; urgency=low
+
+  [ K Lauer ]
+  * FIX: re-check context_cache after sentinel lock
+  * MNT: lock in one step; use a new sentinel each time
+  * FIX: replace connection callback poll() with sleep()
+
+ -- Daron Chabot <chabot@frib.msu.edu>  Wed, 05 Jun 2019 16:23:13 -0400
+
 pyepics (3.4.0-3) unstable; urgency=low
 
   [ K Lauer ]
